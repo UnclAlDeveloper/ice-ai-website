@@ -36,9 +36,9 @@ image:
     dockerfile: Dockerfile
     args:
       # NEXT_PUBLIC_* variables must be available at build time for Next.js
-      NEXT_PUBLIC_AUTO_ADS_ELEVENLABS_API_KEY: sk_20140dd7a51fcfa2baa52b43109a677e420eb546a6fee8ec
-      NEXT_PUBLIC_AUTO_ADS_ELEVENLABS_VOICE_ID: ls2g82VFnsMrJnBf9iW0
-      NEXT_PUBLIC_ELEVENLABS_TEXT2SPEECH_MODEL_NAME: eleven_flash_v2_5
+      NEXT_PUBLIC_AUTO_ADS_ELEVENLABS_API_KEY: ${NEXT_PUBLIC_AUTO_ADS_ELEVENLABS_API_KEY}
+      NEXT_PUBLIC_AUTO_ADS_ELEVENLABS_VOICE_ID: ${NEXT_PUBLIC_AUTO_ADS_ELEVENLABS_VOICE_ID}
+      NEXT_PUBLIC_ELEVENLABS_TEXT2SPEECH_MODEL_NAME: ${NEXT_PUBLIC_ELEVENLABS_TEXT2SPEECH_MODEL_NAME}
   # Port exposed through your container to route traffic to it.
   port: 3000
 
@@ -61,25 +61,25 @@ variables:                    # Pass environment variables as key value pairs.
   # Cognito configuration (from .env file - use generate-manifest.sh to populate)
   # These values are substituted from environment variables when using generate-manifest.sh
   # IMPORTANT: Keep placeholders in git - never commit manifests with real secrets!
-  AUTH_COGNITO_ID: 76sth8426sg1kdru9ss5gmfavq
-  AUTH_COGNITO_ISSUER: https://cognito-idp.eu-west-2.amazonaws.com/eu-west-2_aPGfm5Lg7
-  COGNITO_USER_POOL_ID: eu-west-2_aPGfm5Lg7
+  AUTH_COGNITO_ID: ${AUTH_COGNITO_ID}
+  AUTH_COGNITO_ISSUER: ${AUTH_COGNITO_ISSUER}
+  COGNITO_USER_POOL_ID: ${COGNITO_USER_POOL_ID}
 
   # NextAuth secrets (from .env file)
-  NEXTAUTH_SECRET: M8MY0LaymROFEbScBsMAl1jKtLNgz8bQ0veqKfBtMmg=
-  AUTH_SECRET: M8MY0LaymROFEbScBsMAl1jKtLNgz8bQ0veqKfBtMmg=
+  NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+  AUTH_SECRET: ${AUTH_SECRET}
 
   # Cognito client secret (from .env file)
-  AUTH_COGNITO_SECRET: 1fficjp0329uk8m5puusradadta505eb2oct1brrsq1jle2vlldj
+  AUTH_COGNITO_SECRET: ${AUTH_COGNITO_SECRET}
 
   # Google API keys (from .env file)
-  AUTO_ADS_GOOGLE_API_KEY: AIzaSyCf2vCeaX6QtGPU5WKMSiWAP9W0EMXQkiY
-  GEMINI_MODEL_NAME: gemini-3-pro-preview
+  AUTO_ADS_GOOGLE_API_KEY: ${AUTO_ADS_GOOGLE_API_KEY}
+  GEMINI_MODEL_NAME: ${GEMINI_MODEL_NAME}
 
   # Database connection strings (from .env file)
-  ICE_AI_DATABASE_URL: postgresql://ice-ai:silverlinetoasphinx@postgresql.ice-group.ai:5432/ice-ai-dev
-  ANNA_TRAINER_DATABASE_URL: postgresql://ice-ai:silverlinetoasphinx@postgresql.ice-group.ai:5432/anna-trainer-dev
-  AUTO_ADS_DATABASE_URL: postgresql://ice-ai:silverlinetoasphinx@postgresql.ice-group.ai:5432/auto-ads-dev
+  ICE_AI_DATABASE_URL: ${ICE_AI_DATABASE_URL}
+  ANNA_TRAINER_DATABASE_URL: ${ANNA_TRAINER_DATABASE_URL}
+  AUTO_ADS_DATABASE_URL: ${AUTO_ADS_DATABASE_URL}
 
 # override for the individual environments
 environments:
