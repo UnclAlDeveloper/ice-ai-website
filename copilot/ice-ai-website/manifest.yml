@@ -13,7 +13,7 @@ http:
   path: '/'
   # You can specify a custom health check path. The default is "/".
   healthcheck:
-    path: '/'
+    path: '/api/health'
     success_codes: '200-399'
     interval: 10s
     timeout: 5s
