@@ -1,0 +1,1 @@
+ALTER TABLE "aa"."prospect_listings" ADD COLUMN "auction_closes" timestamp with time zone;

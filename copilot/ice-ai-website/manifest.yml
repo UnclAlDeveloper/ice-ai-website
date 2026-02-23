@@ -1,0 +1,97 @@
+# The manifest for the "ice-ai-website" service.
+# Read the full specification for the "Load Balanced Web Service" type at:
+#  https://aws.github.io/copilot-cli/docs/manifest/lb-web-service/
+
+# Your service name will be used in naming your resources like log groups, ECS services, etc.
+name: ice-ai-website
+type: Load Balanced Web Service
+
+# Distribute traffic to your service.
+http:
+  # Requests to this path will be forwarded to your service.
+  # To match all requests you can use the "/" path.
+  path: '/'
+  # You can specify a custom health check path. The default is "/".
+  healthcheck:
+    path: '/'
+    success_codes: '200-399'
+    interval: 10s
+    timeout: 5s
+    healthy_threshold: 2
+    unhealthy_threshold: 2
+  alias:
+    # NOTE: Hosted zones for these domains need to be created in Route53
+    # Once created, add hosted_zone IDs here
+    - name: staging.ice-group.ai
+      hosted_zone: Z03483053272J607EFPOR
+    - name: staging.auto-ads.ai
+      hosted_zone: Z0398245NADPLP66FD2S
+    - name: staging.anna-trainer.com
+      hosted_zone: Z012299837GC9HP8PXRND
+
+# Configuration for your containers and service.
+image:
+  # Docker build arguments. For additional overrides: https://aws.github.io/copilot-cli/docs/manifest/lb-web-service/#image-build
+  build:
+    dockerfile: Dockerfile
+    args:
+      # NEXT_PUBLIC_* variables must be available at build time for Next.js
+      NEXT_PUBLIC_AUTO_ADS_ELEVENLABS_API_KEY: sk_20140dd7a51fcfa2baa52b43109a677e420eb546a6fee8ec
+      NEXT_PUBLIC_AUTO_ADS_ELEVENLABS_VOICE_ID: ls2g82VFnsMrJnBf9iW0
+      NEXT_PUBLIC_ELEVENLABS_TEXT2SPEECH_MODEL_NAME: eleven_flash_v2_5
+  # Port exposed through your container to route traffic to it.
+  port: 3000
+
+cpu: 512       # Number of CPU units for the task.
+memory: 2048   # Amount of memory in MiB used by the task.
+count: 1       # Number of tasks that should be running in your service.
+exec: true     # Enable running commands in your container.
+network:
+  connect: false # Disable Service Connect temporarily to debug health checks
+
+logging:
+  retention: 7  # Retain CloudWatch Logs for 7 days
+
+variables:                    # Pass environment variables as key value pairs.
+  AUTH_TRUST_HOST: 'true'
+  COGNITO_REGION: eu-west-2
+  AWS_ACCOUNT_ID: 408202150190
+  AWS_REGION_NAME: eu-west-2
+  
+  # Cognito configuration (from .env file - use generate-manifest.sh to populate)
+  # These values are substituted from environment variables when using generate-manifest.sh
+  # IMPORTANT: Keep placeholders in git - never commit manifests with real secrets!
+  AUTH_COGNITO_ID: 30hhh9lvh0anjunk4o6ej7j396
+  AUTH_COGNITO_ISSUER: https://cognito-idp.eu-west-2.amazonaws.com/eu-west-2_88hvPJu87
+  COGNITO_USER_POOL_ID: eu-west-2_88hvPJu87
+
+  # NextAuth secrets (from .env file)
+  NEXTAUTH_SECRET: M8MY0LaymROFEbScBsMAl1jKtLNgz8bQ0veqKfBtMmg=
+  AUTH_SECRET: M8MY0LaymROFEbScBsMAl1jKtLNgz8bQ0veqKfBtMmg=
+
+  # Cognito client secret (from .env file)
+  AUTH_COGNITO_SECRET: m374iuhlsj02s5gsl9t4jfvoh9528c8g8dt1med5vrr10mk34d5
+
+  # Google API keys (from .env file)
+  AUTO_ADS_GOOGLE_API_KEY: AIzaSyCf2vCeaX6QtGPU5WKMSiWAP9W0EMXQkiY
+  GEMINI_MODEL_NAME: gemini-3-pro-preview
+
+  # Database connection strings (from .env file)
+  ICE_AI_DATABASE_URL: postgresql://ice-ai:silverlinetoasphinx@postgresql.ice-group.ai:5432/ice-ai-dev
+  ANNA_TRAINER_DATABASE_URL: postgresql://ice-ai:silverlinetoasphinx@postgresql.ice-group.ai:5432/anna-trainer-dev
+  AUTO_ADS_DATABASE_URL: postgresql://ice-ai:silverlinetoasphinx@postgresql.ice-group.ai:5432/auto-ads-dev
+
+# override for the individual environments
+environments:
+  staging:
+    deployment:            # The deployment strategy for the "staging" environment.
+       rolling: 'recreate' # Stops existing tasks before new ones are started for faster deployments.
+  production:
+    http:
+      alias:
+        # NOTE: Hosted zones for these domains need to be created in Route53
+        # Once created, add hosted_zone IDs here
+        - name: origin.ice-group.ai
+          hosted_zone: Z03483053272J607EFPOR
+    deployment:            # The deployment strategy for the "production" environment.
+       rolling: 'recreate' # Stops existing tasks before new ones are started for faster deployments.

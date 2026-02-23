@@ -1,0 +1,1 @@
+ALTER TABLE "aa"."prospect_listings" ADD COLUMN "ai_campervan_conversion" varchar;

@@ -1,0 +1,1 @@
+ALTER TABLE "aa"."images" ADD COLUMN "temp" integer;

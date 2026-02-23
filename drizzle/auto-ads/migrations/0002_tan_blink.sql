@@ -1,0 +1,1 @@
+ALTER TABLE "aa"."images" DROP COLUMN "temp";
