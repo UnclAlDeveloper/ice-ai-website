@@ -55,22 +55,22 @@ logging:
 variables:                    # Pass environment variables as key value pairs.
   AUTH_TRUST_HOST: 'true'
   COGNITO_REGION: eu-west-2
-  AWS_ACCOUNT_ID: 408202150190
+  AWS_ACCOUNT_ID: 664418974292
   AWS_REGION_NAME: eu-west-2
   
   # Cognito configuration (from .env file - use generate-manifest.sh to populate)
   # These values are substituted from environment variables when using generate-manifest.sh
   # IMPORTANT: Keep placeholders in git - never commit manifests with real secrets!
-  AUTH_COGNITO_ID: 30hhh9lvh0anjunk4o6ej7j396
-  AUTH_COGNITO_ISSUER: https://cognito-idp.eu-west-2.amazonaws.com/eu-west-2_88hvPJu87
-  COGNITO_USER_POOL_ID: eu-west-2_88hvPJu87
+  AUTH_COGNITO_ID: 76sth8426sg1kdru9ss5gmfavq
+  AUTH_COGNITO_ISSUER: https://cognito-idp.eu-west-2.amazonaws.com/eu-west-2_aPGfm5Lg7
+  COGNITO_USER_POOL_ID: eu-west-2_aPGfm5Lg7
 
   # NextAuth secrets (from .env file)
   NEXTAUTH_SECRET: M8MY0LaymROFEbScBsMAl1jKtLNgz8bQ0veqKfBtMmg=
   AUTH_SECRET: M8MY0LaymROFEbScBsMAl1jKtLNgz8bQ0veqKfBtMmg=
 
   # Cognito client secret (from .env file)
-  AUTH_COGNITO_SECRET: m374iuhlsj02s5gsl9t4jfvoh9528c8g8dt1med5vrr10mk34d5
+  AUTH_COGNITO_SECRET: 1fficjp0329uk8m5puusradadta505eb2oct1brrsq1jle2vlldj
 
   # Google API keys (from .env file)
   AUTO_ADS_GOOGLE_API_KEY: AIzaSyCf2vCeaX6QtGPU5WKMSiWAP9W0EMXQkiY
