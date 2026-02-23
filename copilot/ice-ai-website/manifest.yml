@@ -23,11 +23,11 @@ http:
     # NOTE: Hosted zones for these domains need to be created in Route53
     # Once created, add hosted_zone IDs here
     - name: staging.ice-group.ai
-      hosted_zone: Z03483053272J607EFPOR
+      hosted_zone: Z046193526E8I0CCF12OX
     - name: staging.auto-ads.ai
-      hosted_zone: Z0398245NADPLP66FD2S
+      hosted_zone: Z00318961PXPW44P6NIIC
     - name: staging.anna-trainer.com
-      hosted_zone: Z012299837GC9HP8PXRND
+      hosted_zone: Z09276941BZ8DG4YGPFHD
 
 # Configuration for your containers and service.
 image:
@@ -92,6 +92,6 @@ environments:
         # NOTE: Hosted zones for these domains need to be created in Route53
         # Once created, add hosted_zone IDs here
         - name: origin.ice-group.ai
-          hosted_zone: Z03483053272J607EFPOR
+          hosted_zone: Z046193526E8I0CCF12OX
     deployment:            # The deployment strategy for the "production" environment.
        rolling: 'recreate' # Stops existing tasks before new ones are started for faster deployments.
