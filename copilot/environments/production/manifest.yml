@@ -18,7 +18,7 @@ type: Environment
 http:
   public:
     certificates:
-      - arn:aws:acm:eu-west-2:408202150190:certificate/75e8793c-a309-4834-afc1-eecfac2fe3dc
+      - arn:aws:acm:eu-west-2:664418974292:certificate/3f4a91d9-9dc9-4282-9307-00889c454c6a
 
 # Configure observability for your environment resources.
 observability:
