@@ -120,8 +120,8 @@ export default function ThemedContainer({ children, isAuthRoute = false, appBar 
                         } : {}),
                         ...(backgroundImage ? {
                             backgroundImage: `url(${backgroundImage})`,
-                            backgroundSize: 'cover',
-                            backgroundPosition: 'center',
+                            backgroundSize: '100% auto',
+                            backgroundPosition: 'top center',
                             backgroundRepeat: 'no-repeat',
                         } : {}),
                     }

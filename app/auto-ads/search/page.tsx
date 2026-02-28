@@ -1,7 +1,7 @@
 import React, {Suspense} from "react";
 import {getServerSessionFromCookies} from "@app/lib/session";
 import {Typography, Box, Chip} from "@mui/material";
-import {autoAdsDb} from "@app/lib/autoAdsDb";
+import {getAutoAdsDb} from "@app/lib/autoAdsDb";
 import {prospectListings, images} from "@/drizzle/auto-ads/schema";
 import {InferSelectModel, sql, and, or, eq, ilike, lte, gte, gt, desc, inArray, isNotNull, isNull} from "drizzle-orm";
 import ErrorBar from "@components/ErrorBar";
@@ -239,7 +239,7 @@ export default async function Page({
             const whereConditions = buildWhereConditions(filters);
             const whereClause = whereConditions.length > 0 ? and(...whereConditions) : undefined;
 
-            const candidates = await autoAdsDb
+            const candidates = await getAutoAdsDb()
                 .select()
                 .from(prospectListings)
                 .where(whereClause)
@@ -277,7 +277,7 @@ export default async function Page({
             if (listings.length > 0) {
                 logMem("Step 4: querying images");
                 const listingIds = listings.map((listing) => listing.id);
-                const primaryImages = await autoAdsDb
+                const primaryImages = await getAutoAdsDb()
                     .select()
                     .from(images)
                     .where(

@@ -3,13 +3,24 @@ import { pgSchema, serial, varchar, boolean, timestamp, integer, index, unique, 
 export const aa = pgSchema("aa");
 export const listingSource = aa.enum(
 	"listing_source",
-	['Autotrader', 'eBay', 'Facebook', 'Gumtree', 'OnlyVans']
+	['Autotrader', 'Car&Classic', 'eBay', 'Facebook', 'Gumtree', 'ManualEntry', 'OnlyVans']
 )
 export const listingTable = aa.enum("listing_table", ['Prospect', 'Resale'])
 export const prospectListingStatus = aa.enum(
 	"prospect_listing_status",
-	['New', 'Viewed', 'Not Interested', 'Interested', 'Bought']
+	['New', 'Viewed', 'Not Interested', 'Interested', 'Bought', 'Sold']
 )
+
+export const lookups = aa.table("lookups", {
+	id: serial().primaryKey().notNull(),
+	lookupType: varchar("lookup_type").notNull(),
+	code: varchar().notNull(),
+	value: varchar(),
+	description: varchar(),
+}, (table) => [
+	unique("lookups_type_code_unique").on(table.lookupType, table.code),
+	index("idx_lookups_type_code_unique").on(table.lookupType, table.code),
+]);
 
 export const images = aa.table("images", {
 	id: serial().primaryKey().notNull(),
@@ -17,7 +28,6 @@ export const images = aa.table("images", {
 	isPrimary: boolean("is_primary"),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }),
 	listingId: integer("listing_id").notNull(),
-	listingSource: listingSource("listing_source").notNull(),
 	listingTable: listingTable("listing_table").notNull(),
 });
 
@@ -37,9 +47,11 @@ export const prospectListings = aa.table("prospect_listings", {
 	year: integer(),
 	registration: varchar(),
 	currencySymbol: char("currency_symbol", { length: 1 }),
-	askingPrice: integer("asking_price").notNull(),
+	askingPrice: integer("asking_price"),
 	vatStatus: varchar("vat_status"),
 	location: varchar(),
+	driveConfiguration: varchar("drive_configuration"),
+	vrn: varchar(),
 	bodyType: varchar("body_type"),
 	cabType: varchar("cab_type"),
 	fuelType: varchar("fuel_type"),
@@ -67,6 +79,7 @@ export const prospectListings = aa.table("prospect_listings", {
 	aiBuyPriceLow: integer("ai_buy_price_low"),
 	aiBuyPriceHigh: integer("ai_buy_price_high"),
 	aiCampervanConversion: varchar("ai_campervan_conversion"),
+	aiTargetMarket: varchar("ai_target_market"),
 	adsEstBuyPrice: integer("ads_est_buy_price"),
 	adsEstSellPrice: integer("ads_est_sell_price"),
 }, (table) => [
@@ -75,7 +88,6 @@ export const prospectListings = aa.table("prospect_listings", {
 ]);
 
 // SAVED SEARCHES
-
 export const savedSearches = aa.table("saved_searches", {
 	id: serial().primaryKey().notNull(),
 	userId: varchar("user_id").notNull(),

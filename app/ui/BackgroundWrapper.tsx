@@ -27,8 +27,8 @@ export default function BackgroundWrapper({ children }: BackgroundWrapperProps) 
                         const response = await fetch(backgroundImage, { method: 'HEAD' });
                         if (response.ok) {
                             document.body.style.backgroundImage = `url(${backgroundImage})`;
-                            document.body.style.backgroundSize = 'cover';
-                            document.body.style.backgroundPosition = 'center';
+                            document.body.style.backgroundSize = 'auto 100vh';
+                            document.body.style.backgroundPosition = 'top center';
                             document.body.style.backgroundRepeat = 'no-repeat';
                         } else {
                             // Image doesn't exist, don't set background

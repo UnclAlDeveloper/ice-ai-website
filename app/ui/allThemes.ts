@@ -105,6 +105,32 @@ export const autoAdsTheme = createTheme({
         h3: {
             color: deepOrange[600],
         },
+        subtitle2: {
+            color: deepOrange[300],
+        },
+    },
+    components: {
+        MuiInputLabel: {
+            styleOverrides: {
+                root: {
+                    color: red[900],
+                },
+            },
+        },
+        MuiOutlinedInput: {
+            styleOverrides: {
+                root: {
+                    backgroundColor: 'rgba(255, 255, 255, 0.6)',
+                },
+            },
+        },
+        MuiFilledInput: {
+            styleOverrides: {
+                root: {
+                    backgroundColor: 'rgba(255, 255, 255, 0.6)',
+                },
+            },
+        },
     },
     custom: {
         appBarBackground: '#33363A',

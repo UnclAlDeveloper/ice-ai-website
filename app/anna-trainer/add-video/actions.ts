@@ -1,6 +1,6 @@
 "use server";
 
-import {annaTrainerDb} from "@app/lib/annaTrainerDb";
+import {getAnnaTrainerDb} from "@app/lib/annaTrainerDb";
 import {getServerSessionFromCookies} from "@app/lib/session";
 import {AWSAccess} from "@app/lib/AwsAccess";
 import {revalidatePath} from "next/cache";
@@ -35,7 +35,7 @@ export async function getAllLanguages() {
      * Returns an array of language records sorted alphabetically by name.
      */
 
-    const result = await annaTrainerDb.query.languages.findMany({
+    const result = await getAnnaTrainerDb().query.languages.findMany({
         orderBy: [asc(languages.language)],
     });
 
@@ -49,7 +49,7 @@ export async function getVideoStages() {
      * Returns an array of stage records.
      */
 
-    const result = await annaTrainerDb.query.videoStages.findMany({
+    const result = await getAnnaTrainerDb().query.videoStages.findMany({
         orderBy: [asc(videoStages.code)],
     });
 
@@ -772,7 +772,7 @@ export async function saveVideo(videoDefinition: VideoDefinition) {
         throw new Error("Not authenticated");
     }
 
-    const [video] = await annaTrainerDb
+    const [video] = await getAnnaTrainerDb()
         .insert(videos)
         .values({
             ...videoDefinition,
@@ -780,7 +780,7 @@ export async function saveVideo(videoDefinition: VideoDefinition) {
         })
         .returning();
 
-    const videoWithRelations = await annaTrainerDb.query.videos.findFirst({
+    const videoWithRelations = await getAnnaTrainerDb().query.videos.findFirst({
         where: (videos, {eq}) => eq(videos.id, video.id),
         with: {
             language: true,

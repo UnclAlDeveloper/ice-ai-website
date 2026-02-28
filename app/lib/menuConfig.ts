@@ -130,6 +130,15 @@ const menuItems: MenuItem[] = [
         componentType: 'server',
         appName: AppName.AutoAds,
     },
+    {
+        name: 'Manual Entry',
+        path: '/manual-entry',
+        isPublic: false,
+        hideWhenDisabled: true,
+        requiredTier: 'BasicTier',
+        componentType: 'server',
+        appName: AppName.AutoAds,
+    },
 ];
 /* Contains all menu items for this project. */
 

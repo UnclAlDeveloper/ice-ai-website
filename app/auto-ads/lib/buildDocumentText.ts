@@ -6,7 +6,7 @@ export function buildDocumentText(listing: {
     location?: string | null;
     bodyType?: string | null;
     fuelType?: string | null;
-    askingPrice: number;
+    askingPrice?: number | null;
     year?: number | null;
     mileage?: number | null;
     colour?: string | null;
@@ -27,7 +27,7 @@ export function buildDocumentText(listing: {
 
     if (listing.year) parts.push(`Year: ${listing.year}`);
     if (listing.mileage) parts.push(`Mileage: ${listing.mileage.toLocaleString()} miles`);
-    parts.push(`Price: £${listing.askingPrice.toLocaleString()}`);
+    if (listing.askingPrice != null) parts.push(`Price: £${listing.askingPrice.toLocaleString()}`);
     if (listing.location) parts.push(`Location: ${listing.location}`);
     if (listing.bodyType) parts.push(`Body: ${listing.bodyType}`);
     if (listing.fuelType) parts.push(`Fuel: ${listing.fuelType}`);

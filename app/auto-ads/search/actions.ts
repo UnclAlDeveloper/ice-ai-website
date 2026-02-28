@@ -1,6 +1,6 @@
 "use server";
 
-import {autoAdsDb} from "@app/lib/autoAdsDb";
+import {getAutoAdsDb} from "@app/lib/autoAdsDb";
 import {getServerSessionFromCookies} from "@app/lib/session";
 import {revalidatePath} from "next/cache";
 import {savedSearches} from "@/drizzle/auto-ads/schema";
@@ -18,7 +18,7 @@ export async function getSavedSearches(): Promise<{id: number; query: string}[]>
         return [];
     }
 
-    const rows = await autoAdsDb
+    const rows = await getAutoAdsDb()
         .select({id: savedSearches.id, query: savedSearches.query})
         .from(savedSearches)
         .where(eq(savedSearches.userId, session.user.userId))
@@ -46,7 +46,7 @@ export async function saveSearch(query: string): Promise<void> {
 
     const now = new Date().toISOString();
 
-    await autoAdsDb
+    await getAutoAdsDb()
         .insert(savedSearches)
         .values({
             userId: session.user.userId,
@@ -77,7 +77,7 @@ export async function recordSavedSearchUsed(id: number): Promise<void> {
         throw new Error("Not authenticated");
     }
 
-    await autoAdsDb
+    await getAutoAdsDb()
         .update(savedSearches)
         .set({lastUsedAt: new Date().toISOString()})
         .where(and(eq(savedSearches.id, id), eq(savedSearches.userId, session.user.userId)));

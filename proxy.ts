@@ -71,6 +71,12 @@ export default async function middleware(request: NextRequest) {
         
         if (!hasAccess) {
             console.log('[MIDDLEWARE] Unauthorized access attempt:', path, 'User groups:', userGroups, 'Authenticated:', isAuthenticated, 'IsPublic:', menuItem.isPublic);
+            // when not authenticated, send to login with returnTo so they can come back after signing in
+            if (!isAuthenticated) {
+                const loginUrl = new URL('/auth/login', request.url);
+                loginUrl.searchParams.set('returnTo', path);
+                return setPathnameHeader(NextResponse.redirect(loginUrl));
+            }
             const forbiddenUrl = new URL('/forbidden', request.url);
             return setPathnameHeader(NextResponse.redirect(forbiddenUrl));
         }

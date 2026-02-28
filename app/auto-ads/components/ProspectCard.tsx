@@ -28,6 +28,7 @@ const statusColorMap: Record<string, string> = {
 // LISTING SOURCE LOGO PATHS (under public/images/auto-ads/sources/)
 const listingSourceLogoMap: Record<string, string> = {
     'Autotrader': '/images/auto-ads/sources/autotrader.png',
+    'CarAndClassic': '/images/auto-ads/sources/carandclassic.svg',
     'eBay': '/images/auto-ads/sources/ebay.png',
     'Facebook': '/images/auto-ads/sources/facebook.png',
     'Gumtree': '/images/auto-ads/sources/gumtree.png',
@@ -343,7 +344,7 @@ export default function ProspectCard({listing, imageUrl}: ProspectCardProps) {
                         )}
                         {(listing.year || listing.mileage) && ' • '}
                         <Box component="span" sx={{ color: theme.custom.labelColour }}>Price: </Box>
-                        {listing.currencySymbol || '£'}{listing.askingPrice.toLocaleString()}
+                        {listing.currencySymbol || '£'}{listing.askingPrice?.toLocaleString()}
                         {listing.vatStatus && listing.vatStatus !== 'No VAT' && (
                             <> {listing.vatStatus}</>
                         )}
@@ -636,7 +637,7 @@ export default function ProspectCard({listing, imageUrl}: ProspectCardProps) {
                                                     Asking Price:
                                                 </TableCell>
                                                 <TableCell sx={{ color: theme.palette.text.primary, border: 'none', padding: '4px 0', textAlign: 'left', whiteSpace: { xs: 'normal', sm: 'nowrap' }, wordBreak: 'break-word' }}>
-                                                    {listing.currencySymbol || '£'}{listing.askingPrice.toLocaleString()}
+                                                    {listing.currencySymbol || '£'}{listing.askingPrice?.toLocaleString()}
                                                 </TableCell>
                                             </TableRow>
                                             {listing.aiBuyPriceLow !== null && listing.aiBuyPriceHigh !== null && (
@@ -681,7 +682,7 @@ export default function ProspectCard({listing, imageUrl}: ProspectCardProps) {
                                                     <TableCell sx={{ 
                                                         color: (() => {
                                                             const buyMidpoint = (listing.aiBuyPriceLow + listing.aiBuyPriceHigh) / 2;
-                                                            const buyMarkup = buyMidpoint - listing.askingPrice;
+                                                            const buyMarkup = buyMidpoint - (listing.askingPrice ?? 0);
                                                             return buyMarkup < 0 ? theme.palette.error.main : theme.palette.text.primary;
                                                         })(),
                                                         border: 'none', 
@@ -692,8 +693,9 @@ export default function ProspectCard({listing, imageUrl}: ProspectCardProps) {
                                                     }}>
                                                         {(() => {
                                                             const buyMidpoint = (listing.aiBuyPriceLow + listing.aiBuyPriceHigh) / 2;
-                                                            const buyMarkup = buyMidpoint - listing.askingPrice;
-                                                            const buyMarkupPercentage = (buyMarkup / listing.askingPrice) * 100;
+                                                            const askingPrice = listing.askingPrice ?? 0;
+                                                            const buyMarkup = buyMidpoint - askingPrice;
+                                                            const buyMarkupPercentage = askingPrice ? (buyMarkup / askingPrice) * 100 : 0;
                                                             const sign = buyMarkup >= 0 ? '+' : '-';
                                                             return `${sign}${listing.currencySymbol || '£'}${Math.abs(Math.round(buyMarkup)).toLocaleString()} (${sign}${buyMarkupPercentage.toFixed(1)}%)`;
                                                         })()}
@@ -709,7 +711,7 @@ export default function ProspectCard({listing, imageUrl}: ProspectCardProps) {
                                                     <TableCell sx={{ 
                                                         color: (() => {
                                                             const sellMidpoint = (listing.aiSellPriceLow + listing.aiSellPriceHigh) / 2;
-                                                            const sellMarkup = sellMidpoint - listing.aiRepairCost - listing.askingPrice;
+                                                            const sellMarkup = sellMidpoint - listing.aiRepairCost - (listing.askingPrice ?? 0);
                                                             return sellMarkup < 0 ? theme.palette.error.main : theme.palette.text.primary;
                                                         })(),
                                                         border: 'none', 
@@ -720,8 +722,9 @@ export default function ProspectCard({listing, imageUrl}: ProspectCardProps) {
                                                     }}>
                                                         {(() => {
                                                             const sellMidpoint = (listing.aiSellPriceLow + listing.aiSellPriceHigh) / 2;
-                                                            const sellMarkup = sellMidpoint - listing.aiRepairCost - listing.askingPrice;
-                                                            const sellMarkupPercentage = (sellMarkup / listing.askingPrice) * 100;
+                                                            const askingPrice = listing.askingPrice ?? 0;
+                                                            const sellMarkup = sellMidpoint - listing.aiRepairCost - askingPrice;
+                                                            const sellMarkupPercentage = askingPrice ? (sellMarkup / askingPrice) * 100 : 0;
                                                             const sign = sellMarkup >= 0 ? '+' : '-';
                                                             return `${sign}${listing.currencySymbol || '£'}${Math.abs(Math.round(sellMarkup)).toLocaleString()} (${sign}${sellMarkupPercentage.toFixed(1)}%)`;
                                                         })()}

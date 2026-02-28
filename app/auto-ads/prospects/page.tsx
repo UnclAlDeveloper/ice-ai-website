@@ -1,7 +1,7 @@
 import React, {Suspense} from "react";
 import {getServerSessionFromCookies} from "@app/lib/session";
 import {Typography, Box} from "@mui/material";
-import {autoAdsDb} from "@app/lib/autoAdsDb";
+import {getAutoAdsDb} from "@app/lib/autoAdsDb";
 import {prospectListings, images} from "@/drizzle/auto-ads/schema";
 import {inArray, InferSelectModel, sql, desc, asc, eq, and, isNotNull, gt, or, isNull} from "drizzle-orm";
 import ErrorBar from "@components/ErrorBar";
@@ -57,7 +57,7 @@ export default async function Page({
 
     try {
         // test database connection first
-        await autoAdsDb.select().from(prospectListings).limit(0);
+        await getAutoAdsDb().select().from(prospectListings).limit(0);
     } catch (connErr) {
         error = 'Database connection failed:\n';
         error += connErr instanceof Error ? connErr.message : String(connErr);
@@ -74,6 +74,7 @@ export default async function Page({
             const baseConditions = [
                 inArray(prospectListings.status, ['New', 'Viewed']),
                 or(eq(prospectListings.vatStatus, 'No VAT'), isNull(prospectListings.vatStatus)),
+                gt(prospectListings.askingPrice, 0),
             ];
 
             const whereConditions =
@@ -95,7 +96,7 @@ export default async function Page({
 
             const whereClause = and(...whereConditions);
 
-            const [{ count: countResult }] = await autoAdsDb
+            const [{ count: countResult }] = await getAutoAdsDb()
                 .select({ count: sql<number>`count(*)::int` })
                 .from(prospectListings)
                 .where(whereClause);
@@ -113,7 +114,7 @@ export default async function Page({
                             ),
                         ];
 
-            listings = await autoAdsDb
+            listings = await getAutoAdsDb()
                 .select()
                 .from(prospectListings)
                 .where(whereClause)
@@ -124,7 +125,7 @@ export default async function Page({
             // query primary images for each listing
             if (listings.length > 0) {
                 const listingIds = listings.map(listing => listing.id);
-                const primaryImages = await autoAdsDb
+                const primaryImages = await getAutoAdsDb()
                     .select()
                     .from(images)
                     .where(

@@ -2,19 +2,30 @@
 
 import React, {FormEvent, useState} from "react";
 import {Box, Button, Checkbox, FormControlLabel, Stack, TextField, Typography} from "@mui/material";
-import {useRouter} from "next/navigation";
+import {useRouter, useSearchParams} from "next/navigation";
 import AuthLayout from "@components/auth/AuthLayout";
+
+// Return path is safe for redirect (relative, no protocol-relative or external URLs)
+function isSafeReturnTo(returnTo: string | null): boolean {
+    if (!returnTo || typeof returnTo !== "string") return false;
+    const s = returnTo.trim();
+    return s.startsWith("/") && !s.startsWith("//");
+}
 
 // LOGIN PAGE
 export default function LoginPage() {
     /* Login page that authenticates a user against Cognito and supports a remember-me option. */
 
     const router = useRouter();
+    const searchParams = useSearchParams();
     const [username, setUsername] = useState("");
     const [password, setPassword] = useState("");
     const [rememberMe, setRememberMe] = useState(true);
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
+
+    const returnTo = searchParams.get("returnTo");
+    const redirectAfterLogin = isSafeReturnTo(returnTo) ? returnTo! : "/";
 
     const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
         // handle form submission and call the login api route
@@ -67,7 +78,7 @@ export default function LoginPage() {
 
             // Small delay to ensure cookies are processed before redirect
             await new Promise(resolve => setTimeout(resolve, 100));
-            window.location.href = "/";
+            window.location.href = redirectAfterLogin;
         } catch (submitError) {
             console.error("Login error", submitError);
             const errorMessage = submitError instanceof Error ? submitError.message : "Unexpected error while logging in";

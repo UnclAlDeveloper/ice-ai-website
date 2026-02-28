@@ -1,6 +1,6 @@
 "use server";
 
-import {autoAdsDb} from "@app/lib/autoAdsDb";
+import {getAutoAdsDb} from "@app/lib/autoAdsDb";
 import {prospectListings, images} from "@/drizzle/auto-ads/schema";
 import {eq, and, asc} from "drizzle-orm";
 import {getServerSessionFromCookies} from "@app/lib/session";
@@ -22,7 +22,7 @@ export async function fetchListingImages(
     }
 
     try {
-        const rows = await autoAdsDb
+        const rows = await getAutoAdsDb()
             .select({
                 id: images.id,
                 url: images.url,
@@ -64,7 +64,7 @@ export async function updateProspectInterest(
     }
 
     try {
-        await autoAdsDb
+        await getAutoAdsDb()
             .update(prospectListings)
             .set({
                 interestLevel,

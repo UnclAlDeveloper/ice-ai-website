@@ -1,6 +1,6 @@
 "use server";
 
-import {annaTrainerDb} from "@app/lib/annaTrainerDb";
+import {getAnnaTrainerDb} from "@app/lib/annaTrainerDb";
 import {getServerSessionFromCookies} from "@app/lib/session";
 import {revalidatePath} from "next/cache";
 import {preferredLanguages, languages} from "../../../drizzle/anna-trainer/schema";
@@ -18,7 +18,7 @@ export async function getPreferredLanguages() {
         throw new Error("Not authenticated");
     }
 
-    const result = await annaTrainerDb.query.preferredLanguages.findMany({
+    const result = await getAnnaTrainerDb().query.preferredLanguages.findMany({
         where: eq(preferredLanguages.owner, session.user.userId),
         with: {language: true},
     });
@@ -36,7 +36,7 @@ export async function getAllLanguages() {
      * Returns an array of language records sorted alphabetically by name.
      */
 
-    const result = await annaTrainerDb.query.languages.findMany({
+    const result = await getAnnaTrainerDb().query.languages.findMany({
         orderBy: [asc(languages.language)],
     });
 
@@ -61,7 +61,7 @@ export async function savePreferredLanguages(
 
     const userId = session.user.userId;
 
-    await annaTrainerDb.transaction(async (tx) => {
+    await getAnnaTrainerDb().transaction(async (tx) => {
         // delete removed languages
         if (idsToDelete.length > 0) {
             await tx
@@ -88,7 +88,7 @@ export async function savePreferredLanguages(
     revalidatePath("/anna-trainer/preferences");
 
     // return fresh data with real database IDs
-    const updatedPreferences = await annaTrainerDb.query.preferredLanguages.findMany({
+    const updatedPreferences = await getAnnaTrainerDb().query.preferredLanguages.findMany({
         where: eq(preferredLanguages.owner, userId),
         with: {language: true},
     });
