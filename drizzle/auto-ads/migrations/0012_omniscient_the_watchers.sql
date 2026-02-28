@@ -1,0 +1,1 @@
+ALTER TYPE "aa"."prospect_listing_status" ADD VALUE 'Sold';

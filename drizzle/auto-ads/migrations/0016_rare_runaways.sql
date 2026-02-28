@@ -1,0 +1,1 @@
+ALTER TABLE "aa"."prospect_listings" DROP COLUMN "ai_niche_market";

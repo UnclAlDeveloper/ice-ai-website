@@ -1,0 +1,1 @@
+ALTER TABLE "aa"."prospect_listings" ALTER COLUMN "asking_price" DROP NOT NULL;
