@@ -1,5 +1,5 @@
 # Use Debian-based image so onnxruntime-node (glibc) works; Alpine lacks ld-linux-x86-64.so.2
-FROM node:22-slim AS base
+FROM node:24-slim AS base
 
 FROM base AS deps
 
