@@ -10,7 +10,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {prospectListings} from '@/drizzle/auto-ads/schema';
 import {InferSelectModel} from "drizzle-orm";
-import {playTextAsSpeech, getCurrentPlayingText, stopCurrentAudio} from "../lib/elevenlabsTextToSpeech";
+import {playTextAsSpeech, getCurrentPlayingText, stopCurrentAudio} from "../lib/textToSpeech";
 import {useSession} from "@app/lib/useSession";
 import {getUserTier, compareTiers} from "@app/lib/menuUtils";
 import {updateProspectInterest, fetchListingImages} from "./actions";
@@ -28,7 +28,7 @@ const statusColorMap: Record<string, string> = {
 // LISTING SOURCE LOGO PATHS (under public/images/auto-ads/sources/)
 const listingSourceLogoMap: Record<string, string> = {
     'Autotrader': '/images/auto-ads/sources/autotrader.png',
-    'CarAndClassic': '/images/auto-ads/sources/carandclassic.svg',
+    'Car&Classic': '/images/auto-ads/sources/carandclassic.svg',
     'eBay': '/images/auto-ads/sources/ebay.png',
     'Facebook': '/images/auto-ads/sources/facebook.png',
     'Gumtree': '/images/auto-ads/sources/gumtree.png',
@@ -90,7 +90,7 @@ const stripMarkdown = (markdown: string): string => {
 // SPEAK TEXT
 const speakText = async (text: string, onEnded?: () => void): Promise<{success: boolean; stopped?: boolean; error?: string}> => {
     /**
-     * Uses the ElevenLabs API to convert text to speech and play it aloud.
+     * Converts text to speech and plays it aloud via the TTS dispatcher (native on mobile, ElevenLabs on desktop).
      * Returns the result so callers can update playback state; onEnded is called when playback finishes.
      */
 
