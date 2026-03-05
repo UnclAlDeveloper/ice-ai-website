@@ -51,7 +51,6 @@ export const prospectListings = aa.table("prospect_listings", {
 	vatStatus: varchar("vat_status"),
 	location: varchar(),
 	driveConfiguration: varchar("drive_configuration"),
-	vrn: varchar(),
 	bodyType: varchar("body_type"),
 	cabType: varchar("cab_type"),
 	fuelType: varchar("fuel_type"),

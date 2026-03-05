@@ -36,6 +36,7 @@ export default function FilterDropdown() {
                 <MenuItem value="all">All</MenuItem>
                 <MenuItem value="suggested">Suggested</MenuItem>
                 <MenuItem value="campervan-conversions">Campervan Conversions</MenuItem>
+                <MenuItem value="classic-cars">Classic Cars</MenuItem>
             </Select>
         </FormControl>
     );

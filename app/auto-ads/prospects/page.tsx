@@ -71,27 +71,39 @@ export default async function Page({
             const pageParam = resolvedSearchParams?.page;
             page = Math.max(1, parseInt(String(pageParam), 10) || 1);
 
-            const baseConditions = [
-                inArray(prospectListings.status, ['New', 'Viewed']),
-                or(eq(prospectListings.vatStatus, 'No VAT'), isNull(prospectListings.vatStatus)),
-                gt(prospectListings.askingPrice, 0),
-            ];
+            let whereConditions;
 
-            const whereConditions =
-                filter === 'all'
-                    ? baseConditions
-                    : [
-                          ...baseConditions,
-                          isNotNull(prospectListings.aiBuyPriceLow),
-                          isNotNull(prospectListings.aiBuyPriceHigh),
-                          gt(
-                              sql`(${prospectListings.aiBuyPriceLow} + ${prospectListings.aiBuyPriceHigh}) / 2`,
-                              prospectListings.askingPrice
-                          ),
-                      ];
+            if (filter === 'classic-cars') {
+                // classic cars filter: Cars&Classic source with active statuses and required AI pricing/notes
+                whereConditions = [
+                    eq(prospectListings.listingSource, 'Car&Classic'),
+                    inArray(prospectListings.status, ['New', 'Viewed']),
+                    isNotNull(prospectListings.aiSellPriceLow),
+                    isNotNull(prospectListings.aiResellNotes),
+                ];
+            } else {
+                const baseConditions = [
+                    inArray(prospectListings.status, ['New', 'Viewed']),
+                    or(eq(prospectListings.vatStatus, 'No VAT'), isNull(prospectListings.vatStatus)),
+                    gt(prospectListings.askingPrice, 0),
+                ];
 
-            if (filter === 'campervan-conversions') {
-                whereConditions.push(isNotNull(prospectListings.aiCampervanConversion));
+                whereConditions =
+                    filter === 'all'
+                        ? baseConditions
+                        : [
+                              ...baseConditions,
+                              isNotNull(prospectListings.aiBuyPriceLow),
+                              isNotNull(prospectListings.aiBuyPriceHigh),
+                              gt(
+                                  sql`(${prospectListings.aiBuyPriceLow} + ${prospectListings.aiBuyPriceHigh}) / 2`,
+                                  prospectListings.askingPrice
+                              ),
+                          ];
+
+                if (filter === 'campervan-conversions') {
+                    whereConditions.push(isNotNull(prospectListings.aiCampervanConversion));
+                }
             }
 
             const whereClause = and(...whereConditions);
@@ -186,11 +198,13 @@ export default async function Page({
                     </Typography>
                 ) : listings.length === 0 ? (
                     <Typography>
-                        {resolvedSearchParams?.filter === 'campervan-conversions'
-                            ? 'No prospects found with status "New" or "Viewed" that have campervan conversion information.'
-                            : resolvedSearchParams?.filter === 'all'
-                              ? 'No prospects found with status "New" or "Viewed".'
-                              : 'No suggested prospects found with status "New" or "Viewed".'}
+                        {resolvedSearchParams?.filter === 'classic-cars'
+                            ? 'No classic car prospects found with status "New" or "Viewed".'
+                            : resolvedSearchParams?.filter === 'campervan-conversions'
+                              ? 'No prospects found with status "New" or "Viewed" that have campervan conversion information.'
+                              : resolvedSearchParams?.filter === 'all'
+                                ? 'No prospects found with status "New" or "Viewed".'
+                                : 'No suggested prospects found with status "New" or "Viewed".'}
                     </Typography>
                 ) : (
                     <>
