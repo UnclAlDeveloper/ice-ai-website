@@ -115,16 +115,23 @@ export default async function Page({
 
             totalCount = countResult ?? 0;
 
+            // build sort order, accounting for classic-cars having a different suggested formula
             const orderByClause =
                 sort === 'latest'
                     ? [desc(prospectListings.updatedAt)]
                     : sort === 'alphabetical'
                       ? [asc(sql`${prospectListings.makeAndModel} || ${prospectListings.shortDescription}`)]
-                      : [
-                            desc(
-                                sql`(${prospectListings.aiBuyPriceLow} + ${prospectListings.aiBuyPriceHigh})::float / ${prospectListings.askingPrice}`
-                            ),
-                        ];
+                      : filter === 'classic-cars'
+                        ? [
+                              desc(
+                                  sql`(${prospectListings.aiSellPriceLow} + ${prospectListings.aiSellPriceHigh}) / 2 * 0.9 - ${prospectListings.aiRepairCost} - ${prospectListings.askingPrice}`
+                              ),
+                          ]
+                        : [
+                              desc(
+                                  sql`(${prospectListings.aiBuyPriceLow} + ${prospectListings.aiBuyPriceHigh})::float / ${prospectListings.askingPrice}`
+                              ),
+                          ];
 
             listings = await getAutoAdsDb()
                 .select()
