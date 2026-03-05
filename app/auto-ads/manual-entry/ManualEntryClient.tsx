@@ -9,11 +9,9 @@ import {
     MenuItem,
     IconButton,
     Tooltip,
-    Alert,
-    Snackbar,
 } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
-import {getProspectListing, getManualEntryListings, saveProspectListing} from "./actions";
+import {getProspectListing, getManualEntryListings} from "./actions";
 import type {ProspectListingData} from "./actions";
 import ProspectListingEditor from "../components/ProspectListingEditor";
 
@@ -51,7 +49,7 @@ const NEW_LISTING_DEFAULTS: ProspectListingData = {
 
 // MANUAL ENTRY CLIENT PROPS
 interface ManualEntryClientProps {
-    existingListings: {id: number; makeAndModel: string}[];
+    existingListings: {id: number; makeAndModel: string; shortDescription: string}[];
     lookupMap: Record<string, string[]>;
 }
 /** Props received from the server component: existing listing summaries and lookup values. */
@@ -67,12 +65,6 @@ export default function ManualEntryClient({existingListings, lookupMap}: ManualE
     const [listings, setListings] = useState(existingListings);
     const [selectedId, setSelectedId] = useState<number | "">("");
     const [editorData, setEditorData] = useState<ProspectListingData | null>(null);
-    const [loading, setLoading] = useState(false);
-    const [snackbar, setSnackbar] = useState<{open: boolean; message: string; severity: "success" | "error"}>({
-        open: false,
-        message: "",
-        severity: "success",
-    });
 
     // HANDLE SELECT LISTING
     const handleSelectListing = useCallback(async (id: number) => {
@@ -81,16 +73,11 @@ export default function ManualEntryClient({existingListings, lookupMap}: ManualE
          */
 
         setSelectedId(id);
-        setLoading(true);
-        try {
-            const result = await getProspectListing(id);
-            if (result.success && result.listing) {
-                setEditorData(result.listing);
-            } else {
-                setSnackbar({open: true, message: result.error || "Failed to load listing", severity: "error"});
-            }
-        } finally {
-            setLoading(false);
+        const result = await getProspectListing(id);
+        if (result.success && result.listing) {
+            setEditorData(result.listing);
+        } else {
+            console.error("Failed to load listing:", result.error);
         }
     }, []);
 
@@ -104,35 +91,22 @@ export default function ManualEntryClient({existingListings, lookupMap}: ManualE
         setEditorData({...NEW_LISTING_DEFAULTS});
     }, []);
 
-    // HANDLE SAVE
-    const handleSave = useCallback(async (data: ProspectListingData) => {
+    // HANDLE SAVED
+    const handleSaved = useCallback(async (data: ProspectListingData) => {
         /**
-         * Persists the editor form data via the server action, then refreshes
-         * the listings dropdown to reflect any changes.
+         * Called by the editor after a successful save. Refreshes the listings
+         * dropdown and switches to the newly created record when applicable.
          */
 
-        setLoading(true);
-        try {
-            const result = await saveProspectListing(data);
-            if (result.success) {
-                setSnackbar({open: true, message: "Listing saved successfully", severity: "success"});
+        // refresh the listings dropdown
+        const refreshed = await getManualEntryListings();
+        if (refreshed.success && refreshed.listings) {
+            setListings(refreshed.listings);
+        }
 
-                // refresh the listings dropdown
-                const refreshed = await getManualEntryListings();
-                if (refreshed.success && refreshed.listings) {
-                    setListings(refreshed.listings);
-                }
-
-                // if this was a new listing, switch to editing the inserted record
-                if (!data.id && result.id) {
-                    setSelectedId(result.id);
-                    setEditorData({...data, id: result.id});
-                }
-            } else {
-                setSnackbar({open: true, message: result.error || "Failed to save listing", severity: "error"});
-            }
-        } finally {
-            setLoading(false);
+        if (data.id) {
+            setSelectedId(data.id);
+            setEditorData(data);
         }
     }, []);
 
@@ -161,7 +135,7 @@ export default function ManualEntryClient({existingListings, lookupMap}: ManualE
                     >
                         {listings.map((listing) => (
                             <MenuItem key={listing.id} value={listing.id}>
-                                {listing.makeAndModel}
+                                {listing.makeAndModel} - {listing.shortDescription}
                             </MenuItem>
                         ))}
                     </Select>
@@ -185,25 +159,9 @@ export default function ManualEntryClient({existingListings, lookupMap}: ManualE
                 <ProspectListingEditor
                     data={editorData}
                     lookupMap={lookupMap}
-                    onSave={handleSave}
-                    saving={loading}
+                    onSaved={handleSaved}
                 />
             )}
-
-            <Snackbar
-                open={snackbar.open}
-                autoHideDuration={4000}
-                onClose={() => setSnackbar((prev) => ({...prev, open: false}))}
-                anchorOrigin={{vertical: "bottom", horizontal: "center"}}
-            >
-                <Alert
-                    onClose={() => setSnackbar((prev) => ({...prev, open: false}))}
-                    severity={snackbar.severity}
-                    variant="filled"
-                >
-                    {snackbar.message}
-                </Alert>
-            </Snackbar>
         </Box>
     );
 }

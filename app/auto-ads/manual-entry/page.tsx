@@ -54,7 +54,7 @@ export default async function Page() {
         );
     }
 
-    let existingListings: {id: number; makeAndModel: string}[] = [];
+    let existingListings: {id: number; makeAndModel: string; shortDescription: string}[] = [];
     let lookupMap: Record<string, string[]> = {};
     let error: string | null = null;
 
@@ -65,6 +65,7 @@ export default async function Page() {
                 .select({
                     id: prospectListings.id,
                     makeAndModel: prospectListings.makeAndModel,
+                    shortDescription: prospectListings.shortDescription,
                 })
                 .from(prospectListings)
                 .where(

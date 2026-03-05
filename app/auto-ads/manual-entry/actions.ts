@@ -46,13 +46,13 @@ export type ProspectListingData = {
 // GET MANUAL ENTRY LISTINGS
 export async function getManualEntryListings(): Promise<{
     success: boolean;
-    listings?: {id: number; makeAndModel: string}[];
+    listings?: {id: number; makeAndModel: string; shortDescription: string}[];
     error?: string;
 }> {
     /**
      * Fetches all prospect listings with source "ManualEntry" and a status
-     * other than "Sold", returning only the id and make/model for use in the
-     * listing selector dropdown.
+     * other than "Sold", returning the id, make/model, and short description
+     * for use in the listing selector dropdown.
      */
 
     const session = await getServerSessionFromCookies();
@@ -65,6 +65,7 @@ export async function getManualEntryListings(): Promise<{
             .select({
                 id: prospectListings.id,
                 makeAndModel: prospectListings.makeAndModel,
+                shortDescription: prospectListings.shortDescription,
             })
             .from(prospectListings)
             .where(
@@ -254,6 +255,7 @@ export async function saveProspectListing(data: ProspectListingData): Promise<{
             .values({
                 hashCode,
                 createdAt: now,
+                updatedAt: now,
                 listingSource: "ManualEntry",
                 status: data.status as typeof prospectListings.$inferInsert.status,
                 makeAndModel: data.makeAndModel,
