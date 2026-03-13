@@ -128,15 +128,22 @@ export async function uploadListingImage(formData: FormData): Promise<{
         await aws.saveMedia(imageHash, ext, buffer);
         const url = aws.getMediaUrl(imageHash, ext);
 
-        // flag as primary when the listing has no existing images
-        const existing = await getAutoAdsDb()
-            .select({id: images.id})
-            .from(images)
-            .where(and(
-                eq(images.listingTable, listingTableVal as "Prospect" | "Resale"),
-                eq(images.listingId, listingId),
-            ))
-            .limit(1);
+        // use explicit isPrimary when provided, otherwise auto-detect
+        const isPrimaryRaw = formData.get("isPrimary");
+        let isPrimary: boolean;
+        if (isPrimaryRaw !== null) {
+            isPrimary = isPrimaryRaw === "true";
+        } else {
+            const existing = await getAutoAdsDb()
+                .select({id: images.id})
+                .from(images)
+                .where(and(
+                    eq(images.listingTable, listingTableVal as "Prospect" | "Resale"),
+                    eq(images.listingId, listingId),
+                ))
+                .limit(1);
+            isPrimary = existing.length === 0;
+        }
 
         const [inserted] = await getAutoAdsDb()
             .insert(images)
@@ -145,7 +152,7 @@ export async function uploadListingImage(formData: FormData): Promise<{
                 listingId,
                 listingTable: listingTableVal as "Prospect" | "Resale",
                 createdAt: new Date().toISOString(),
-                isPrimary: existing.length === 0,
+                isPrimary,
             })
             .returning({id: images.id, url: images.url, isPrimary: images.isPrimary});
 

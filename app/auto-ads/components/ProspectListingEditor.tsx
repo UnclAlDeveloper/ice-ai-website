@@ -19,10 +19,11 @@ import {
 import Grid from "@mui/material/Grid2";
 import SaveIcon from "@mui/icons-material/Save";
 import AddPhotoAlternateIcon from "@mui/icons-material/AddPhotoAlternate";
+import PhotoIcon from "@mui/icons-material/Photo";
 import DeleteIcon from "@mui/icons-material/Delete";
 import {saveProspectListing} from "../manual-entry/actions";
 import type {ProspectListingData} from "../manual-entry/actions";
-import {fetchListingImages, uploadListingImage, deleteListingImage} from "./actions";
+import {fetchListingImages, uploadListingImage, deleteListingImage, detectNumberplate} from "./actions";
 
 // STATUS OPTIONS
 const STATUS_OPTIONS = ["New", "Viewed", "Not Interested", "Interested", "Bought", "Sold"] as const;
@@ -71,15 +72,18 @@ interface ProspectListingEditorProps {
     data: ProspectListingData;
     lookupMap: Record<string, string[]>;
     onSaved?: (data: ProspectListingData) => void;
+    pendingPrimaryImage?: File | null;
+    onPendingImageConsumed?: () => void;
 }
 /**
- * Props accepted by the editor: current listing data, lookup options, and an
- * optional callback fired after a successful save with the persisted data
- * (including the assigned id for new records).
+ * Props accepted by the editor: current listing data, lookup options, an
+ * optional callback fired after a successful save, an optional pending
+ * primary image file captured before the listing was created, and a callback
+ * to clear that pending file once it has been uploaded to S3.
  */
 
 // PROSPECT LISTING EDITOR
-export default function ProspectListingEditor({data, lookupMap, onSaved}: ProspectListingEditorProps) {
+export default function ProspectListingEditor({data, lookupMap, onSaved, pendingPrimaryImage, onPendingImageConsumed}: ProspectListingEditorProps) {
     /**
      * Reusable form for editing prospect listing fields. Calls the
      * saveProspectListing server action directly so the record is always
@@ -97,7 +101,23 @@ export default function ProspectListingEditor({data, lookupMap, onSaved}: Prospe
     });
     const [imageList, setImageList] = useState<{id: number; url: string; isPrimary: boolean | null}[]>([]);
     const [uploading, setUploading] = useState(false);
+    const [uploadingPrimary, setUploadingPrimary] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const primaryFileInputRef = useRef<HTMLInputElement>(null);
+
+    const primaryImage = imageList.find((img) => img.isPrimary === true) ?? null;
+    const secondaryImages = imageList.filter((img) => !img.isPrimary);
+
+    // create a blob url for previewing the pending image before it is uploaded
+    const [pendingPreviewUrl, setPendingPreviewUrl] = useState<string | null>(null);
+    useEffect(() => {
+        if (pendingPrimaryImage) {
+            const url = URL.createObjectURL(pendingPrimaryImage);
+            setPendingPreviewUrl(url);
+            return () => URL.revokeObjectURL(url);
+        }
+        setPendingPreviewUrl(null);
+    }, [pendingPrimaryImage]);
 
     // reset form when the parent switches listing
     useEffect(() => {
@@ -130,8 +150,8 @@ export default function ProspectListingEditor({data, lookupMap, onSaved}: Prospe
     const handleSubmit = async (e: React.FormEvent) => {
         /**
          * Inserts or updates the prospect listing via the server action. On a
-         * successful insert the returned id is merged into the local form state
-         * so subsequent saves become updates. Notifies the parent via onSaved.
+         * successful insert the pending primary image (if any) is uploaded to
+         * S3 and linked to the new listing before notifying the parent.
          */
 
         e.preventDefault();
@@ -139,6 +159,20 @@ export default function ProspectListingEditor({data, lookupMap, onSaved}: Prospe
         try {
             const result = await saveProspectListing(formData);
             if (result.success && result.id) {
+                // upload the pending primary image now that the listing has an id
+                if (pendingPrimaryImage) {
+                    const fd = new FormData();
+                    fd.append("file", pendingPrimaryImage);
+                    fd.append("listingId", String(result.id));
+                    fd.append("listingTable", "Prospect");
+                    fd.append("isPrimary", "true");
+                    const uploadResult = await uploadListingImage(fd);
+                    if (uploadResult.success && uploadResult.image) {
+                        setImageList((prev) => [...prev, uploadResult.image!]);
+                    }
+                    onPendingImageConsumed?.();
+                }
+
                 const persisted = {...formData, id: result.id};
                 setFormData(persisted);
                 setSnackbar({open: true, message: "Listing saved successfully", severity: "success"});
@@ -156,8 +190,8 @@ export default function ProspectListingEditor({data, lookupMap, onSaved}: Prospe
     // HANDLE FILE SELECT
     const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
         /**
-         * Iterates over files chosen by the user, uploads each to S3 via the
-         * server action, and appends the returned image record to the local list.
+         * Iterates over files chosen by the user, uploads each to S3 as a
+         * non-primary image and appends the returned record to the local list.
          */
 
         const files = e.target.files;
@@ -170,6 +204,7 @@ export default function ProspectListingEditor({data, lookupMap, onSaved}: Prospe
                 fd.append("file", file);
                 fd.append("listingId", String(formData.id));
                 fd.append("listingTable", "Prospect");
+                fd.append("isPrimary", "false");
 
                 const result = await uploadListingImage(fd);
                 if (result.success && result.image) {
@@ -183,6 +218,49 @@ export default function ProspectListingEditor({data, lookupMap, onSaved}: Prospe
         } finally {
             setUploading(false);
             if (fileInputRef.current) fileInputRef.current.value = "";
+        }
+    };
+
+    // HANDLE PRIMARY FILE SELECT
+    const handlePrimaryFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        /**
+         * Uploads a single file as the primary image, then sends the uploaded
+         * image to Gemini to read the numberplate. If the Registration field is
+         * empty and a plate is detected, it is auto-populated.
+         */
+
+        const files = e.target.files;
+        if (!files?.length || !formData.id) return;
+
+        setUploadingPrimary(true);
+        try {
+            const fd = new FormData();
+            fd.append("file", files[0]);
+            fd.append("listingId", String(formData.id));
+            fd.append("listingTable", "Prospect");
+            fd.append("isPrimary", "true");
+
+            const result = await uploadListingImage(fd);
+            if (result.success && result.image) {
+                setImageList((prev) => [...prev, result.image!]);
+
+                // auto-detect the numberplate if the registration field is empty
+                if (!formData.registration) {
+                    detectNumberplate(result.image.url).then((plateResult) => {
+                        if (plateResult.success && plateResult.numberplate) {
+                            setField("registration", plateResult.numberplate);
+                            setSnackbar({open: true, message: `Numberplate detected: ${plateResult.numberplate}`, severity: "success"});
+                        }
+                    });
+                }
+            } else {
+                setSnackbar({open: true, message: result.error || "Failed to upload primary image", severity: "error"});
+            }
+        } catch (err) {
+            setSnackbar({open: true, message: err instanceof Error ? err.message : "Upload failed", severity: "error"});
+        } finally {
+            setUploadingPrimary(false);
+            if (primaryFileInputRef.current) primaryFileInputRef.current.value = "";
         }
     };
 
@@ -207,11 +285,112 @@ export default function ProspectListingEditor({data, lookupMap, onSaved}: Prospe
 
     return (
         <Box component="form" onSubmit={handleSubmit} noValidate>
+            {/* --- primary image (floated so content wraps around it) --- */}
+            {formData.id ? (
+                <Box sx={{float: {sm: "left"}, mr: {sm: 3}, mb: 2, textAlign: {xs: "center", sm: "left"}}}>
+                    {primaryImage ? (
+                        <Box
+                            sx={{
+                                position: "relative",
+                                maxWidth: 320,
+                                mx: {xs: "auto", sm: 0},
+                                borderRadius: 1,
+                                overflow: "hidden",
+                                border: "1px solid",
+                                borderColor: "divider",
+                            }}
+                        >
+                            <Box
+                                component="img"
+                                src={primaryImage.url}
+                                alt="Primary"
+                                sx={{maxWidth: 320, width: "100%", height: "auto", display: "block"}}
+                            />
+                            <IconButton
+                                size="small"
+                                onClick={() => handleDeleteImage(primaryImage.id)}
+                                sx={{
+                                    position: "absolute",
+                                    top: 2,
+                                    right: 2,
+                                    bgcolor: "rgba(0,0,0,0.5)",
+                                    color: "white",
+                                    "&:hover": {bgcolor: "rgba(0,0,0,0.7)"},
+                                }}
+                            >
+                                <DeleteIcon fontSize="small" />
+                            </IconButton>
+                        </Box>
+                    ) : (
+                        <Box
+                            onClick={() => primaryFileInputRef.current?.click()}
+                            sx={{
+                                width: 120,
+                                height: 120,
+                                mx: {xs: "auto", sm: 0},
+                                borderRadius: 1,
+                                border: "2px dashed",
+                                borderColor: "divider",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                cursor: uploadingPrimary ? "default" : "pointer",
+                                "&:hover": uploadingPrimary ? {} : {borderColor: "primary.main", bgcolor: "action.hover"},
+                            }}
+                        >
+                            {uploadingPrimary ? <CircularProgress size={24} /> : <PhotoIcon color="action" sx={{fontSize: 36}} />}
+                        </Box>
+                    )}
+                    <input
+                        ref={primaryFileInputRef}
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        hidden
+                        onChange={handlePrimaryFileSelect}
+                    />
+                </Box>
+            ) : pendingPreviewUrl ? (
+                <Box sx={{float: {sm: "left"}, mr: {sm: 3}, mb: 2, textAlign: {xs: "center", sm: "left"}}}>
+                    <Box
+                        sx={{
+                            maxWidth: 320,
+                            mx: {xs: "auto", sm: 0},
+                            borderRadius: 1,
+                            overflow: "hidden",
+                            border: "1px solid",
+                            borderColor: "divider",
+                        }}
+                    >
+                        <Box
+                            component="img"
+                            src={pendingPreviewUrl}
+                            alt="Primary (pending upload)"
+                            sx={{maxWidth: 320, width: "100%", height: "auto", display: "block"}}
+                        />
+                    </Box>
+                </Box>
+            ) : (
+                <Typography variant="body2" color="text.secondary" sx={{mb: 2}}>
+                    Save the listing first to add a primary image.
+                </Typography>
+            )}
+
             {/* --- vehicle identity --- */}
             <Typography variant="subtitle2" color="text.secondary" sx={{mb: 1}}>
                 Vehicle Identity
             </Typography>
             <Grid container spacing={2}>
+                <Grid size={fieldSize}>
+                    <TextField
+                        label="Registration"
+                        size="small"
+                        fullWidth
+                        value={formData.registration ?? ""}
+                        onChange={(e) => setField("registration", e.target.value || null)}
+                    />
+                </Grid>
+
                 {AUTOCOMPLETE_FIELDS.filter((f) =>
                     f.key === "makeAndModel"
                 ).map((field) => (
@@ -276,16 +455,6 @@ export default function ProspectListingEditor({data, lookupMap, onSaved}: Prospe
                         type="number"
                         value={formData.year ?? ""}
                         onChange={(e) => setField("year", e.target.value ? parseInt(e.target.value, 10) : null)}
-                    />
-                </Grid>
-
-                <Grid size={fieldSize}>
-                    <TextField
-                        label="Registration"
-                        size="small"
-                        fullWidth
-                        value={formData.registration ?? ""}
-                        onChange={(e) => setField("registration", e.target.value || null)}
                     />
                 </Grid>
 
@@ -454,7 +623,7 @@ export default function ProspectListingEditor({data, lookupMap, onSaved}: Prospe
             </Typography>
             {formData.id ? (
                 <Box sx={{display: "flex", flexWrap: "wrap", gap: 2, alignItems: "flex-start"}}>
-                    {imageList.map((img) => (
+                    {secondaryImages.map((img) => (
                         <Box
                             key={img.id}
                             sx={{

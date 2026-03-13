@@ -9,8 +9,19 @@ import {
     MenuItem,
     IconButton,
     Tooltip,
+    Dialog,
+    DialogTitle,
+    DialogContent,
+    DialogContentText,
+    DialogActions,
+    Button,
+    Typography,
+    CircularProgress,
 } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
+import RemoveIcon from "@mui/icons-material/Remove";
+import PhotoCameraIcon from "@mui/icons-material/PhotoCamera";
+import {green, red} from "@mui/material/colors";
 import {getProspectListing, getManualEntryListings} from "./actions";
 import type {ProspectListingData} from "./actions";
 import ProspectListingEditor from "../components/ProspectListingEditor";
@@ -153,6 +164,7 @@ export default function ManualEntryClient({existingListings, lookupMap}: ManualE
                 sx={{
                     display: "flex",
                     alignItems: "center",
+                    width: "100%",
                     gap: 1,
                     mb: 3,
                 }}
@@ -196,11 +208,12 @@ export default function ManualEntryClient({existingListings, lookupMap}: ManualE
 
                 <Tooltip title="New listing">
                     <IconButton
-                        color="primary"
                         onClick={handleNewListing}
                         sx={{
-                            border: 1,
-                            borderColor: "primary.main",
+                            border: 2,
+                            borderColor: green[900],
+                            color: green[900],
+                            "&:hover": {bgcolor: green[50]},
                         }}
                     >
                         <AddIcon />
@@ -213,6 +226,8 @@ export default function ManualEntryClient({existingListings, lookupMap}: ManualE
                     data={editorData}
                     lookupMap={lookupMap}
                     onSaved={handleSaved}
+                    pendingPrimaryImage={pendingFile}
+                    onPendingImageConsumed={handlePendingImageConsumed}
                 />
             )}
 
