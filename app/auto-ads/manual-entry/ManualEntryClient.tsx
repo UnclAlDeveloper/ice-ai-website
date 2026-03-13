@@ -1,6 +1,6 @@
 "use client";
 
-import React, {useState, useCallback} from "react";
+import React, {useState, useCallback, useRef, useEffect} from "react";
 import {
     Box,
     FormControl,
@@ -24,6 +24,7 @@ import PhotoCameraIcon from "@mui/icons-material/PhotoCamera";
 import {green, red} from "@mui/material/colors";
 import {getProspectListing, getManualEntryListings} from "./actions";
 import type {ProspectListingData} from "./actions";
+import {deleteProspectListing, detectNumberplateFromFile} from "../components/actions";
 import ProspectListingEditor from "../components/ProspectListingEditor";
 
 // NEW LISTING DEFAULTS
@@ -68,9 +69,11 @@ interface ManualEntryClientProps {
 // MANUAL ENTRY CLIENT
 export default function ManualEntryClient({existingListings, lookupMap}: ManualEntryClientProps) {
     /**
-     * Client shell for the Manual Entry page. Provides a dropdown to select an
-     * existing manual-entry listing for editing, a "+" button to start a new
-     * listing, and hosts the ProspectListingEditor form.
+     * Client shell for the Manual Entry page. For new listings the user must
+     * first take a photo or upload an image of the vehicle. The numberplate is
+     * detected via Gemini, and only then is the full editor form revealed with
+     * the Registration field pre-populated. Existing listings open the editor
+     * directly.
      */
 
     const [listings, setListings] = useState(existingListings);
@@ -79,13 +82,34 @@ export default function ManualEntryClient({existingListings, lookupMap}: ManualE
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
     const [deleting, setDeleting] = useState(false);
 
+    const [showCapture, setShowCapture] = useState(false);
+    const [pendingFile, setPendingFile] = useState<File | null>(null);
+    const [detectingPlate, setDetectingPlate] = useState(false);
+    const [capturePreviewUrl, setCapturePreviewUrl] = useState<string | null>(null);
+    const captureInputRef = useRef<HTMLInputElement>(null);
+    const captureGenRef = useRef(0);
+
+    // manage blob url lifecycle for the capture preview
+    useEffect(() => {
+        if (pendingFile && showCapture) {
+            const url = URL.createObjectURL(pendingFile);
+            setCapturePreviewUrl(url);
+            return () => URL.revokeObjectURL(url);
+        }
+        setCapturePreviewUrl(null);
+    }, [pendingFile, showCapture]);
 
     // HANDLE SELECT LISTING
     const handleSelectListing = useCallback(async (id: number) => {
         /**
-         * Loads the selected listing's full data into the editor form.
+         * Loads the selected listing's full data into the editor form and
+         * cancels any in-progress new-listing capture.
          */
 
+        captureGenRef.current++;
+        setShowCapture(false);
+        setPendingFile(null);
+        setDetectingPlate(false);
         setSelectedId(id);
         const result = await getProspectListing(id);
         if (result.success && result.listing) {
@@ -98,11 +122,50 @@ export default function ManualEntryClient({existingListings, lookupMap}: ManualE
     // HANDLE NEW LISTING
     const handleNewListing = useCallback(() => {
         /**
-         * Resets the editor to a blank form with default values for a new listing.
+         * Enters photo-capture mode for a new listing. The editor form stays
+         * hidden until the user takes a photo and the numberplate is detected.
          */
 
+        captureGenRef.current++;
         setSelectedId("");
-        setEditorData({...NEW_LISTING_DEFAULTS});
+        setEditorData(null);
+        setShowCapture(true);
+        setPendingFile(null);
+        setDetectingPlate(false);
+    }, []);
+
+    // HANDLE INITIAL CAPTURE
+    const handleInitialCapture = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+        /**
+         * Processes the photo or file the user selected in the capture step.
+         * Sends the image to Gemini for numberplate detection, then reveals
+         * the editor form with the Registration field pre-populated.
+         */
+
+        const files = e.target.files;
+        if (!files?.length) return;
+
+        const gen = captureGenRef.current;
+        const file = files[0];
+        setPendingFile(file);
+        setDetectingPlate(true);
+
+        const fd = new FormData();
+        fd.append("file", file);
+        const result = await detectNumberplateFromFile(fd);
+
+        // discard result if the user navigated away during detection
+        if (gen !== captureGenRef.current) return;
+
+        setDetectingPlate(false);
+        setShowCapture(false);
+        setEditorData({
+            ...NEW_LISTING_DEFAULTS,
+            registration: result.success && result.numberplate ? result.numberplate : null,
+        });
+
+        // reset the input so the same file can be re-selected if needed
+        if (captureInputRef.current) captureInputRef.current.value = "";
     }, []);
 
     // HANDLE SAVED
@@ -112,7 +175,6 @@ export default function ManualEntryClient({existingListings, lookupMap}: ManualE
          * dropdown and switches to the newly created record when applicable.
          */
 
-        // refresh the listings dropdown
         const refreshed = await getManualEntryListings();
         if (refreshed.success && refreshed.listings) {
             setListings(refreshed.listings);
@@ -220,6 +282,58 @@ export default function ManualEntryClient({existingListings, lookupMap}: ManualE
                     </IconButton>
                 </Tooltip>
             </Box>
+
+            {showCapture && !editorData && (
+                <Box sx={{display: "flex", flexDirection: "column", alignItems: "center", py: 6}}>
+                    {capturePreviewUrl ? (
+                        <>
+                            <Box
+                                component="img"
+                                src={capturePreviewUrl}
+                                alt="Captured"
+                                sx={{maxWidth: 320, width: "100%", height: "auto", borderRadius: 1, mb: 2}}
+                            />
+                            <CircularProgress size={36} sx={{mb: 1}} />
+                            <Typography color="text.secondary">
+                                Detecting numberplate…
+                            </Typography>
+                        </>
+                    ) : (
+                        <Box
+                            onClick={() => captureInputRef.current?.click()}
+                            sx={{
+                                width: 160,
+                                height: 160,
+                                borderRadius: 2,
+                                border: "3px dashed",
+                                borderColor: "divider",
+                                display: "flex",
+                                flexDirection: "column",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                cursor: "pointer",
+                                "&:hover": {borderColor: "primary.main", bgcolor: "action.hover"},
+                            }}
+                        >
+                            <PhotoCameraIcon color="action" sx={{fontSize: 48, mb: 1}} />
+                            <Typography variant="body2" color="text.secondary" sx={{display: {xs: "block", sm: "none"}}}>
+                                Take photo
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary" sx={{display: {xs: "none", sm: "block"}}}>
+                                Upload photo
+                            </Typography>
+                        </Box>
+                    )}
+                    <input
+                        ref={captureInputRef}
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        hidden
+                        onChange={handleInitialCapture}
+                    />
+                </Box>
+            )}
 
             {editorData && (
                 <ProspectListingEditor

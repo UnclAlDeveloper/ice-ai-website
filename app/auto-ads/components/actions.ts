@@ -7,6 +7,7 @@ import {eq, and, asc} from "drizzle-orm";
 import {getServerSessionFromCookies} from "@app/lib/session";
 import {revalidatePath} from "next/cache";
 import {AWSAccess} from "@app/lib/AwsAccess";
+import {readNumberplateFromUrl, readNumberplateFromBuffer} from "@app/auto-ads/lib/numberplateReader";
 
 // FETCH LISTING IMAGES
 export async function fetchListingImages(
@@ -270,6 +271,64 @@ export async function deleteListingImage(imageId: number): Promise<{
         return {success: true};
     } catch (err) {
         console.error("Failed to delete listing image:", err);
+        return {success: false, error: err instanceof Error ? err.message : String(err)};
+    }
+}
+
+// DETECT NUMBERPLATE
+export async function detectNumberplate(imageUrl: string): Promise<{
+    success: boolean;
+    numberplate?: string | null;
+    error?: string;
+}> {
+    /**
+     * Sends an image URL to Gemini to read the vehicle numberplate.
+     * Returns the detected plate text or null if none was found.
+     */
+
+    const session = await getServerSessionFromCookies();
+    if (!session) {
+        return {success: false, error: "Not authenticated"};
+    }
+
+    try {
+        const plate = await readNumberplateFromUrl(imageUrl);
+        return {success: true, numberplate: plate};
+    } catch (err) {
+        console.error("Failed to detect numberplate:", err);
+        return {success: false, error: err instanceof Error ? err.message : String(err)};
+    }
+}
+
+// DETECT NUMBERPLATE FROM FILE
+export async function detectNumberplateFromFile(formData: FormData): Promise<{
+    success: boolean;
+    numberplate?: string | null;
+    error?: string;
+}> {
+    /**
+     * Accepts a raw image file via FormData and sends it directly to Gemini
+     * to read the numberplate, without uploading to S3 first. Used during the
+     * initial photo capture step before the listing has been created.
+     */
+
+    const session = await getServerSessionFromCookies();
+    if (!session) {
+        return {success: false, error: "Not authenticated"};
+    }
+
+    const file = formData.get("file") as File | null;
+    if (!file) {
+        return {success: false, error: "No file provided"};
+    }
+
+    try {
+        const buffer = Buffer.from(await file.arrayBuffer());
+        const mimeType = file.type || "image/jpeg";
+        const plate = await readNumberplateFromBuffer(buffer, mimeType);
+        return {success: true, numberplate: plate};
+    } catch (err) {
+        console.error("Failed to detect numberplate from file:", err);
         return {success: false, error: err instanceof Error ? err.message : String(err)};
     }
 }
