@@ -1,0 +1,1 @@
+ALTER TABLE "aa"."prospect_listings" ADD COLUMN "value_add_improvements" varchar;

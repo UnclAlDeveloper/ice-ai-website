@@ -1,0 +1,1 @@
+ALTER TABLE "aa"."prospect_listings" RENAME COLUMN "value_add_improvements" TO "ai_value_add_improvements";
