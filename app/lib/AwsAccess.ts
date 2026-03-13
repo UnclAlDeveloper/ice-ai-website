@@ -509,6 +509,16 @@ export class AWSAccess {
         }
     }
 
+    // REMOVE MEDIA
+    async removeMedia(name: string, mediaType: string, ignoreIfNotExists: boolean = true): Promise<void> {
+        /**
+         * Remove a media file from S3 in the media path.
+         */
+
+        const key = path.join(this.mediaPath, `${name}.${mediaType}`).replace(/\\/g, "/");
+        await this._removeFromS3(key, ignoreIfNotExists);
+    }
+
     // REMOVE OBJECT
     async removeObject(objectName: string, ignoreIfNotExists: boolean = true): Promise<void> {
         /**

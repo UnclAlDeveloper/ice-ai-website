@@ -65,6 +65,9 @@ export default function ManualEntryClient({existingListings, lookupMap}: ManualE
     const [listings, setListings] = useState(existingListings);
     const [selectedId, setSelectedId] = useState<number | "">("");
     const [editorData, setEditorData] = useState<ProspectListingData | null>(null);
+    const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+    const [deleting, setDeleting] = useState(false);
+
 
     // HANDLE SELECT LISTING
     const handleSelectListing = useCallback(async (id: number) => {
@@ -110,6 +113,40 @@ export default function ManualEntryClient({existingListings, lookupMap}: ManualE
         }
     }, []);
 
+    // HANDLE PENDING IMAGE CONSUMED
+    const handlePendingImageConsumed = useCallback(() => {
+        /**
+         * Called by the editor after it uploads the pending primary image to
+         * S3 on first save, so the temp file reference can be released.
+         */
+
+        setPendingFile(null);
+    }, []);
+
+    // HANDLE DELETE LISTING
+    const handleDeleteListing = useCallback(async () => {
+        /**
+         * Deletes the currently selected prospect listing and all of its images,
+         * then removes it from the local dropdown list and resets the editor.
+         */
+
+        if (typeof selectedId !== "number") return;
+        setDeleting(true);
+        try {
+            const result = await deleteProspectListing(selectedId);
+            if (result.success) {
+                setListings((prev) => prev.filter((l) => l.id !== selectedId));
+                setSelectedId("");
+                setEditorData(null);
+            } else {
+                console.error("Failed to delete listing:", result.error);
+            }
+        } finally {
+            setDeleting(false);
+            setDeleteDialogOpen(false);
+        }
+    }, [selectedId]);
+
     return (
         <Box>
             <Box
@@ -141,6 +178,22 @@ export default function ManualEntryClient({existingListings, lookupMap}: ManualE
                     </Select>
                 </FormControl>
 
+                {selectedId !== "" && (
+                    <Tooltip title="Delete listing">
+                        <IconButton
+                            onClick={() => setDeleteDialogOpen(true)}
+                            sx={{
+                                border: 2,
+                                borderColor: red[900],
+                                color: red[900],
+                                "&:hover": {bgcolor: red[50]},
+                            }}
+                        >
+                            <RemoveIcon />
+                        </IconButton>
+                    </Tooltip>
+                )}
+
                 <Tooltip title="New listing">
                     <IconButton
                         color="primary"
@@ -162,6 +215,24 @@ export default function ManualEntryClient({existingListings, lookupMap}: ManualE
                     onSaved={handleSaved}
                 />
             )}
+
+            <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
+                <DialogTitle>Delete Listing</DialogTitle>
+                <DialogContent>
+                    <DialogContentText>
+                        This will permanently delete the listing and all of its images.
+                        This action cannot be undone.
+                    </DialogContentText>
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setDeleteDialogOpen(false)} disabled={deleting}>
+                        Cancel
+                    </Button>
+                    <Button onClick={handleDeleteListing} color="error" disabled={deleting}>
+                        {deleting ? "Deleting…" : "Delete"}
+                    </Button>
+                </DialogActions>
+            </Dialog>
         </Box>
     );
 }

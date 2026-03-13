@@ -158,14 +158,15 @@ export async function uploadListingImage(formData: FormData): Promise<{
     }
 }
 
-// DELETE LISTING IMAGE
-export async function deleteListingImage(imageId: number): Promise<{
+// DELETE PROSPECT LISTING
+export async function deleteProspectListing(listingId: number): Promise<{
     success: boolean;
     error?: string;
 }> {
     /**
-     * Removes an image record from the database by id. The underlying S3 object
-     * is left in place to avoid cross-origin deletion issues with scraped URLs.
+     * Removes a prospect listing and all of its associated images. Each image
+     * hosted in our S3 bucket is deleted from storage first, then all image
+     * rows and the listing row itself are removed from the database.
      */
 
     const session = await getServerSessionFromCookies();
@@ -174,6 +175,85 @@ export async function deleteListingImage(imageId: number): Promise<{
     }
 
     try {
+        // fetch all images belonging to this listing
+        const imageRows = await getAutoAdsDb()
+            .select({id: images.id})
+            .from(images)
+            .where(
+                and(
+                    eq(images.listingTable, "Prospect"),
+                    eq(images.listingId, listingId),
+                )
+            );
+
+        // delete each image from s3 and the database
+        for (const img of imageRows) {
+            await deleteListingImage(img.id);
+        }
+
+        // delete the prospect listing itself
+        await getAutoAdsDb()
+            .delete(prospectListings)
+            .where(eq(prospectListings.id, listingId));
+
+        revalidatePath("/auto-ads/manual-entry");
+        revalidatePath("/auto-ads/prospects");
+        return {success: true};
+    } catch (err) {
+        console.error("Failed to delete prospect listing:", err);
+        return {success: false, error: err instanceof Error ? err.message : String(err)};
+    }
+}
+
+// DELETE LISTING IMAGE
+export async function deleteListingImage(imageId: number): Promise<{
+    success: boolean;
+    error?: string;
+}> {
+    /**
+     * Deletes an image by first removing it from S3 (if it is hosted in our
+     * bucket), then deleting the corresponding row from the images table.
+     * External / scraped URLs are left untouched on their origin servers.
+     */
+
+    const session = await getServerSessionFromCookies();
+    if (!session) {
+        return {success: false, error: "Not authenticated"};
+    }
+
+    try {
+        // fetch the image record so we have the url for s3 deletion
+        const [image] = await getAutoAdsDb()
+            .select({id: images.id, url: images.url})
+            .from(images)
+            .where(eq(images.id, imageId))
+            .limit(1);
+
+        if (!image) {
+            return {success: false, error: "Image not found"};
+        }
+
+        // only attempt s3 deletion for images hosted in our bucket
+        const bucket = process.env.AUTO_ADS_BUCKET || "";
+        if (bucket && image.url.includes(`${bucket}.s3.`)) {
+            const urlPath = new URL(image.url).pathname.slice(1);
+            const lastSlash = urlPath.lastIndexOf("/");
+            const filename = urlPath.slice(lastSlash + 1);
+            const dotIndex = filename.indexOf(".");
+            const name = filename.slice(0, dotIndex);
+            const mediaType = filename.slice(dotIndex + 1);
+
+            const aws = new AWSAccess(
+                bucket,
+                "prospects",
+                undefined,
+                undefined,
+                undefined,
+                "images",
+            );
+            await aws.removeMedia(name, mediaType);
+        }
+
         await getAutoAdsDb()
             .delete(images)
             .where(eq(images.id, imageId));
