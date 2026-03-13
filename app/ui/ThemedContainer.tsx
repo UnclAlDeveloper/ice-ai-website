@@ -32,9 +32,10 @@ export default function ThemedContainer({ children, isAuthRoute = false, appBar 
         if (backgroundImage) {
             const img = new Image();
             img.onload = () => {
-                const containerWidth = 1800;
+                const vw = window.innerWidth;
                 const vh = window.innerHeight;
-                const scale = Math.max(containerWidth / img.naturalWidth, vh / img.naturalHeight);
+                const widthForCover = Math.max(1800, vw);
+                const scale = Math.max(widthForCover / img.naturalWidth, vh / img.naturalHeight);
                 const bgWidth = Math.round(img.naturalWidth * scale);
                 const bgHeight = Math.round(img.naturalHeight * scale);
                 setBgSize(`${bgWidth}px ${bgHeight}px`);
