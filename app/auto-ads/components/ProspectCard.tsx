@@ -237,6 +237,7 @@ export default function ProspectCard({listing, imageUrl}: ProspectCardProps) {
     const workAndRepairsText = stripMarkdown(listing.aiWorkAndRepairs || '');
     const notesText = stripMarkdown(listing.aiResellNotes || '');
     const campervanText = stripMarkdown(listing.aiCampervanConversion || '');
+    const valueAddImprovementsText = stripMarkdown(listing.aiValueAddImprovements || '');
     const targetMarketText = stripMarkdown(listing.aiTargetMarket || '');
 
     const handleExpandClick = () => {
@@ -622,6 +623,37 @@ export default function ProspectCard({listing, imageUrl}: ProspectCardProps) {
                                         '& em': { fontStyle: 'italic' },
                                     }}>
                                         <ReactMarkdown remarkPlugins={[remarkGfm]}>{listing.aiCampervanConversion}</ReactMarkdown>
+                                    </Box>
+                                </Box>
+                            )}
+                            {listing.aiValueAddImprovements && (
+                                <Box sx={{ mb: 2 }}>
+                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                                        <Typography variant="subtitle2" sx={{ color: theme.custom.labelColour }}>
+                                            Value Add Improvements
+                                        </Typography>
+                                        <IconButton
+                                            onClick={() => handleSpeak(valueAddImprovementsText)}
+                                            size="small"
+                                            sx={{ p: 0.5, minWidth: 'auto' }}
+                                            title="Speak value add improvements"
+                                            color={playingText === valueAddImprovementsText ? 'secondary' : 'inherit'}
+                                        >
+                                            <VolumeUpIcon fontSize="small" />
+                                        </IconButton>
+                                    </Box>
+                                    <Box sx={{ 
+                                        fontSize: '0.875rem',
+                                        wordBreak: 'break-word',
+                                        overflowWrap: 'break-word',
+                                        '& p': { margin: '0.5em 0' },
+                                        '& ul, & ol': { margin: '0.5em 0', paddingLeft: '1.5em' },
+                                        '& li': { margin: '0.75em 0' },
+                                        '& h1, & h2, & h3, & h4, & h5, & h6': { margin: '0.75em 0 0.5em 0' },
+                                        '& strong': { fontWeight: 'bold' },
+                                        '& em': { fontStyle: 'italic' },
+                                    }}>
+                                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{listing.aiValueAddImprovements}</ReactMarkdown>
                                     </Box>
                                 </Box>
                             )}

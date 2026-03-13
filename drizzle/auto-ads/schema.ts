@@ -78,6 +78,7 @@ export const prospectListings = aa.table("prospect_listings", {
 	aiBuyPriceLow: integer("ai_buy_price_low"),
 	aiBuyPriceHigh: integer("ai_buy_price_high"),
 	aiCampervanConversion: varchar("ai_campervan_conversion"),
+	aiValueAddImprovements: varchar("ai_value_add_improvements"),
 	aiTargetMarket: varchar("ai_target_market"),
 	adsEstBuyPrice: integer("ads_est_buy_price"),
 	adsEstSellPrice: integer("ads_est_sell_price"),

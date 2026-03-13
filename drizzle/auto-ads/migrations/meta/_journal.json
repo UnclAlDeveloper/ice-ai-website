@@ -127,6 +127,20 @@
       "when": 1772732000480,
       "tag": "0017_cool_sleeper",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1772750650668,
+      "tag": "0018_strange_the_hood",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1772751127096,
+      "tag": "0019_chemical_radioactive_man",
+      "breakpoints": true
     }
   ]
 }
