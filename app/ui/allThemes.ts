@@ -63,7 +63,7 @@ export const iceAiTheme = createTheme({
             main: orange[500],
         },
         text: {
-            primary: pink[500],
+            primary: blue[900],
             secondary: orange[500],
         },
     },

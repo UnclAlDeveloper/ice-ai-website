@@ -1,5 +1,6 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import { useTheme } from '@mui/material/styles';
 import { Container } from '@mui/system';
 import Box from '@mui/material/Box';
@@ -24,6 +25,23 @@ export default function ThemedContainer({ children, isAuthRoute = false, appBar 
     const isMobile = useMediaQuery(theme.breakpoints.down('md'));
     const appBarHeight = isMobile ? 56 : 64;
     const totalHeaderHeight = 6 + appBarHeight;
+    const [bgSize, setBgSize] = useState('100% auto');
+
+    useEffect(() => {
+        // load image and compute cover size against container width and viewport height
+        if (backgroundImage) {
+            const img = new Image();
+            img.onload = () => {
+                const containerWidth = 1800;
+                const vh = window.innerHeight;
+                const scale = Math.max(containerWidth / img.naturalWidth, vh / img.naturalHeight);
+                const bgWidth = Math.round(img.naturalWidth * scale);
+                const bgHeight = Math.round(img.naturalHeight * scale);
+                setBgSize(`${bgWidth}px ${bgHeight}px`);
+            };
+            img.src = backgroundImage;
+        }
+    }, [backgroundImage]);
 
     return (
         <Box sx={{margin: 0, padding: 0}}>
@@ -120,7 +138,7 @@ export default function ThemedContainer({ children, isAuthRoute = false, appBar 
                         } : {}),
                         ...(backgroundImage ? {
                             backgroundImage: `url(${backgroundImage})`,
-                            backgroundSize: '100% auto',
+                            backgroundSize: bgSize,
                             backgroundPosition: 'top center',
                             backgroundRepeat: 'no-repeat',
                         } : {}),

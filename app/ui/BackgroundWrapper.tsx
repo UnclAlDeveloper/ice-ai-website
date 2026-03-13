@@ -19,37 +19,36 @@ export default function BackgroundWrapper({ children }: BackgroundWrapperProps) 
     useEffect(() => {
         if (backgroundImage) {
             const mediaQuery = window.matchMedia('(max-width: 1799px)');
-            
-            const applyBackground = async () => {
-                if (mediaQuery.matches) {
-                    // Check if image exists before setting background
-                    try {
-                        const response = await fetch(backgroundImage, { method: 'HEAD' });
-                        if (response.ok) {
-                            document.body.style.backgroundImage = `url(${backgroundImage})`;
-                            document.body.style.backgroundSize = 'auto 100vh';
-                            document.body.style.backgroundPosition = 'top center';
-                            document.body.style.backgroundRepeat = 'no-repeat';
-                        } else {
-                            // Image doesn't exist, don't set background
-                            document.body.style.backgroundImage = '';
-                            document.body.style.backgroundSize = '';
-                            document.body.style.backgroundPosition = '';
-                            document.body.style.backgroundRepeat = '';
-                        }
-                    } catch {
-                        // Network error or image doesn't exist, don't set background
-                        document.body.style.backgroundImage = '';
-                        document.body.style.backgroundSize = '';
-                        document.body.style.backgroundPosition = '';
-                        document.body.style.backgroundRepeat = '';
-                    }
-                } else {
-                    document.body.style.backgroundImage = '';
-                    document.body.style.backgroundSize = '';
-                    document.body.style.backgroundPosition = '';
-                    document.body.style.backgroundRepeat = '';
+
+            const clearBodyBackground = () => {
+                document.body.style.backgroundImage = '';
+                document.body.style.backgroundSize = '';
+                document.body.style.backgroundPosition = '';
+                document.body.style.backgroundRepeat = '';
+            };
+
+            // load image and compute cover size against viewport, then lock it as fixed pixels
+            const applyBackground = () => {
+                if (!mediaQuery.matches) {
+                    clearBodyBackground();
+                    return;
                 }
+
+                const img = new Image();
+                img.onload = () => {
+                    const vw = window.innerWidth;
+                    const vh = window.innerHeight;
+                    const scale = Math.max(vw / img.naturalWidth, vh / img.naturalHeight);
+                    const bgWidth = Math.round(img.naturalWidth * scale);
+                    const bgHeight = Math.round(img.naturalHeight * scale);
+
+                    document.body.style.backgroundImage = `url(${backgroundImage})`;
+                    document.body.style.backgroundSize = `${bgWidth}px ${bgHeight}px`;
+                    document.body.style.backgroundPosition = 'top center';
+                    document.body.style.backgroundRepeat = 'no-repeat';
+                };
+                img.onerror = () => clearBodyBackground();
+                img.src = backgroundImage;
             };
 
             applyBackground();
@@ -57,10 +56,7 @@ export default function BackgroundWrapper({ children }: BackgroundWrapperProps) 
 
             return () => {
                 mediaQuery.removeEventListener('change', applyBackground);
-                document.body.style.backgroundImage = '';
-                document.body.style.backgroundSize = '';
-                document.body.style.backgroundPosition = '';
-                document.body.style.backgroundRepeat = '';
+                clearBodyBackground();
             };
         }
     }, [backgroundImage]);
