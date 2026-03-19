@@ -1,0 +1,1 @@
+ALTER TABLE "aa"."resale_listings" ALTER COLUMN "prospect_id" DROP NOT NULL;

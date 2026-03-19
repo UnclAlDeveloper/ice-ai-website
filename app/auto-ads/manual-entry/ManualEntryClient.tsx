@@ -22,9 +22,10 @@ import AddIcon from "@mui/icons-material/Add";
 import RemoveIcon from "@mui/icons-material/Remove";
 import PhotoCameraIcon from "@mui/icons-material/PhotoCamera";
 import {green, red} from "@mui/material/colors";
-import {getProspectListing, getManualEntryListings} from "./actions";
+import {getProspectListing, getManualEntryListings, saveProspectListing} from "./actions";
 import type {ProspectListingData} from "./actions";
-import {deleteProspectListing, detectNumberplateFromFile} from "../components/actions";
+import {deleteProspectListing, detectNumberplateFromFile, lookupRegistration, uploadListingImage} from "../components/actions";
+import {deriveShortDescription} from "../lib/deriveShortDescription";
 import ProspectListingEditor from "../components/ProspectListingEditor";
 
 // NEW LISTING DEFAULTS
@@ -56,12 +57,20 @@ const NEW_LISTING_DEFAULTS: ProspectListingData = {
     motStatus: null,
     motExpiry: null,
     specsAndFeatures: null,
+    taxStatus: null,
+    taxDueDate: null,
+    co2Emissions: null,
+    markedForExport: null,
+    dateOfLastV5CIssued: null,
+    monthOfFirstRegistration: null,
+    typeApproval: null,
+    revenueWeight: null,
 };
 /** Default field values applied when creating a brand-new manual entry listing. */
 
 // MANUAL ENTRY CLIENT PROPS
 interface ManualEntryClientProps {
-    existingListings: {id: number; makeAndModel: string; shortDescription: string}[];
+    existingListings: {id: number; makeAndModel: string; shortDescription: string; registration: string | null}[];
     lookupMap: Record<string, string[]>;
 }
 /** Props received from the server component: existing listing summaries and lookup values. */
@@ -85,6 +94,7 @@ export default function ManualEntryClient({existingListings, lookupMap}: ManualE
     const [showCapture, setShowCapture] = useState(false);
     const [pendingFile, setPendingFile] = useState<File | null>(null);
     const [detectingPlate, setDetectingPlate] = useState(false);
+    const [autoSaving, setAutoSaving] = useState(false);
     const [capturePreviewUrl, setCapturePreviewUrl] = useState<string | null>(null);
     const captureInputRef = useRef<HTMLInputElement>(null);
     const captureGenRef = useRef(0);
@@ -110,6 +120,7 @@ export default function ManualEntryClient({existingListings, lookupMap}: ManualE
         setShowCapture(false);
         setPendingFile(null);
         setDetectingPlate(false);
+        setAutoSaving(false);
         setSelectedId(id);
         const result = await getProspectListing(id);
         if (result.success && result.listing) {
@@ -132,14 +143,19 @@ export default function ManualEntryClient({existingListings, lookupMap}: ManualE
         setShowCapture(true);
         setPendingFile(null);
         setDetectingPlate(false);
+        setAutoSaving(false);
     }, []);
 
     // HANDLE INITIAL CAPTURE
     const handleInitialCapture = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
         /**
          * Processes the photo or file the user selected in the capture step.
-         * Sends the image to Gemini for numberplate detection, then reveals
-         * the editor form with the Registration field pre-populated.
+         * Detects the numberplate via Gemini. If the detected plate already
+         * exists in the manual entries, opens that record and returns early.
+         * Otherwise, chains a DVLA lookup to pre-populate vehicle fields, then
+         * auto-saves the listing to obtain a database id and immediately
+         * uploads the captured image as the primary image — all before the
+         * editor form is revealed.
          */
 
         const files = e.target.files;
@@ -157,12 +173,83 @@ export default function ManualEntryClient({existingListings, lookupMap}: ManualE
         // discard result if the user navigated away during detection
         if (gen !== captureGenRef.current) return;
 
-        setDetectingPlate(false);
-        setShowCapture(false);
-        setEditorData({
+        const plate = result.success && result.numberplate ? result.numberplate : null;
+
+        // if the plate matches an existing manual entry, open that record instead
+        if (plate) {
+            const normPlate = plate.replace(/\s+/g, "").toUpperCase();
+            const existing = listings.find(
+                (l) => l.registration && l.registration.replace(/\s+/g, "").toUpperCase() === normPlate
+            );
+            if (existing) {
+                if (captureInputRef.current) captureInputRef.current.value = "";
+                await handleSelectListing(existing.id);
+                return;
+            }
+        }
+
+        let initialData: ProspectListingData = {
             ...NEW_LISTING_DEFAULTS,
-            registration: result.success && result.numberplate ? result.numberplate : null,
-        });
+            registration: plate,
+        };
+
+        // chain a DVLA lookup when a plate was detected
+        if (plate) {
+            const dvlaResult = await lookupRegistration(plate);
+            if (gen !== captureGenRef.current) return;
+            if (dvlaResult.success && dvlaResult.data) {
+                const dvla = dvlaResult.data;
+                const keys = Object.keys(dvla) as (keyof typeof dvla)[];
+                for (const key of keys) {
+                    const dvlaValue = dvla[key];
+                    if (dvlaValue == null) continue;
+                    const current = initialData[key as keyof ProspectListingData];
+                    const isEmpty = current === null || current === undefined || current === "" || current === 0;
+                    if (isEmpty) {
+                        (initialData as Record<string, unknown>)[key] = dvlaValue;
+                    }
+                }
+
+                // derive a short description from the dvla-populated fields if not already set
+                if (!initialData.shortDescription) {
+                    const derived = deriveShortDescription(initialData);
+                    if (derived) initialData = {...initialData, shortDescription: derived};
+                }
+            }
+        }
+
+        setDetectingPlate(false);
+        setAutoSaving(true);
+
+        // auto-save the listing to get its database id
+        const saveResult = await saveProspectListing(initialData);
+        if (gen !== captureGenRef.current) return;
+
+        if (saveResult.success && saveResult.id) {
+            // upload the captured photo as the primary image
+            const imgFd = new FormData();
+            imgFd.append("file", file);
+            imgFd.append("listingId", String(saveResult.id));
+            imgFd.append("listingTable", "Prospect");
+            imgFd.append("isPrimary", "true");
+            await uploadListingImage(imgFd);
+            if (gen !== captureGenRef.current) return;
+
+            // refresh the listings dropdown with the new record
+            const refreshed = await getManualEntryListings();
+            if (gen !== captureGenRef.current) return;
+            if (refreshed.success && refreshed.listings) {
+                setListings(refreshed.listings);
+            }
+
+            initialData = {...initialData, id: saveResult.id};
+            setSelectedId(saveResult.id);
+        }
+
+        setAutoSaving(false);
+        setPendingFile(null);
+        setShowCapture(false);
+        setEditorData(initialData);
 
         // reset the input so the same file can be re-selected if needed
         if (captureInputRef.current) captureInputRef.current.value = "";
@@ -246,7 +333,7 @@ export default function ManualEntryClient({existingListings, lookupMap}: ManualE
                     >
                         {listings.map((listing) => (
                             <MenuItem key={listing.id} value={listing.id}>
-                                {listing.makeAndModel} - {listing.shortDescription}
+                                {listing.registration ?? listing.makeAndModel} - {listing.shortDescription}
                             </MenuItem>
                         ))}
                     </Select>
@@ -295,7 +382,7 @@ export default function ManualEntryClient({existingListings, lookupMap}: ManualE
                             />
                             <CircularProgress size={36} sx={{mb: 1}} />
                             <Typography color="text.secondary">
-                                Detecting numberplate…
+                                {autoSaving ? "Saving listing…" : "Detecting numberplate…"}
                             </Typography>
                         </>
                     ) : (

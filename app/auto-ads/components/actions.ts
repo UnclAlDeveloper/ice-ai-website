@@ -2,12 +2,15 @@
 
 import {randomBytes} from "crypto";
 import {getAutoAdsDb} from "@app/lib/autoAdsDb";
-import {prospectListings, images} from "@/drizzle/auto-ads/schema";
+import {prospectListings, resaleListings, images} from "@/drizzle/auto-ads/schema";
 import {eq, and, asc} from "drizzle-orm";
 import {getServerSessionFromCookies} from "@app/lib/session";
 import {revalidatePath} from "next/cache";
 import {AWSAccess} from "@app/lib/AwsAccess";
 import {readNumberplateFromUrl, readNumberplateFromBuffer} from "@app/auto-ads/lib/numberplateReader";
+import {lookupVehicle} from "@app/auto-ads/lib/dvlaVehicleEnquiry";
+import {generateDescription, suggestSellingPrice} from "@app/auto-ads/lib/descriptionGenerator";
+import type {ResaleListingData} from "@app/auto-ads/resales/actions";
 
 // FETCH LISTING IMAGES
 export async function fetchListingImages(
@@ -213,6 +216,157 @@ export async function deleteProspectListing(listingId: number): Promise<{
     }
 }
 
+// COPY PROSPECT TO RESALE
+export async function copyProspectToResale(prospectListingId: number): Promise<{
+    success: boolean;
+    id?: number;
+    alreadyCopied?: boolean;
+    error?: string;
+}> {
+    /**
+     * Copies a prospect listing into the resale_listings table, linking the two
+     * via prospect_id. Fields not present on resale listings (url, AI analysis
+     * fields, interestLevel, etc.) are omitted. aiSellPriceLow and
+     * aiSellPriceHigh are intentionally excluded per the copy policy. If a
+     * resale listing already exists for this prospect, returns alreadyCopied
+     * without inserting a duplicate. Revalidates the prospects and resales pages
+     * after a successful insert.
+     */
+
+    const session = await getServerSessionFromCookies();
+    if (!session) {
+        return {success: false, error: "Not authenticated"};
+    }
+
+    try {
+        // fetch the prospect listing to copy from
+        const [prospect] = await getAutoAdsDb()
+            .select()
+            .from(prospectListings)
+            .where(eq(prospectListings.id, prospectListingId))
+            .limit(1);
+
+        if (!prospect) {
+            return {success: false, error: "Prospect listing not found"};
+        }
+
+        // check whether a resale listing already exists for this prospect
+        const [existing] = await getAutoAdsDb()
+            .select({id: resaleListings.id})
+            .from(resaleListings)
+            .where(eq(resaleListings.prospectId, prospectListingId))
+            .limit(1);
+
+        if (existing) {
+            return {success: true, id: existing.id, alreadyCopied: true};
+        }
+
+        const now = new Date().toISOString();
+
+        // insert resale listing copied from prospect, excluding ai sell prices and url
+        const [inserted] = await getAutoAdsDb()
+            .insert(resaleListings)
+            .values({
+                prospectId: prospect.id,
+                createdAt: now,
+                updatedAt: now,
+                listingSource: prospect.listingSource,
+                status: "Bought",
+                makeAndModel: prospect.makeAndModel,
+                shortDescription: prospect.shortDescription,
+                fullDescription: prospect.fullDescription,
+                mileage: prospect.mileage,
+                mileageUnit: prospect.mileageUnit,
+                year: prospect.year,
+                registration: prospect.registration,
+                currencySymbol: prospect.currencySymbol,
+                askingPrice: prospect.askingPrice,
+                vatStatus: prospect.vatStatus,
+                location: prospect.location,
+                bodyType: prospect.bodyType,
+                cabType: prospect.cabType,
+                fuelType: prospect.fuelType,
+                gearboxType: prospect.gearboxType,
+                wheelbase: prospect.wheelbase,
+                engineSize: prospect.engineSize,
+                colour: prospect.colour,
+                seats: prospect.seats,
+                emissionClass: prospect.emissionClass,
+                numberOfOwners: prospect.numberOfOwners,
+                serviceHistory: prospect.serviceHistory,
+                basicHistoryCheck: prospect.basicHistoryCheck,
+                motStatus: prospect.motStatus,
+                motExpiry: prospect.motExpiry,
+                specsAndFeatures: prospect.specsAndFeatures,
+                taxStatus: prospect.taxStatus,
+                taxDueDate: prospect.taxDueDate,
+                co2Emissions: prospect.co2Emissions,
+                markedForExport: prospect.markedForExport,
+                dateOfLastV5CIssued: prospect.dateOfLastV5CIssued,
+                monthOfFirstRegistration: prospect.monthOfFirstRegistration,
+                typeApproval: prospect.typeApproval,
+                revenueWeight: prospect.revenueWeight,
+                adsPrice: null,
+                eBayUrl: "",
+                facebookUrl: "",
+            })
+            .returning({id: resaleListings.id});
+
+        revalidatePath("/auto-ads/prospects");
+        revalidatePath("/auto-ads/resales");
+        return {success: true, id: inserted.id};
+    } catch (err) {
+        console.error("Failed to copy prospect to resale:", err);
+        return {success: false, error: err instanceof Error ? err.message : String(err)};
+    }
+}
+
+// DELETE RESALE LISTING
+export async function deleteResaleListing(listingId: number): Promise<{
+    success: boolean;
+    error?: string;
+}> {
+    /**
+     * Removes a resale listing and all of its associated images. Each image
+     * hosted in our S3 bucket is deleted from storage first, then all image
+     * rows and the listing row itself are removed from the database.
+     */
+
+    const session = await getServerSessionFromCookies();
+    if (!session) {
+        return {success: false, error: "Not authenticated"};
+    }
+
+    try {
+        // fetch all images belonging to this listing
+        const imageRows = await getAutoAdsDb()
+            .select({id: images.id})
+            .from(images)
+            .where(
+                and(
+                    eq(images.listingTable, "Resale"),
+                    eq(images.listingId, listingId),
+                )
+            );
+
+        // delete each image from s3 and the database
+        for (const img of imageRows) {
+            await deleteListingImage(img.id);
+        }
+
+        // delete the resale listing itself
+        await getAutoAdsDb()
+            .delete(resaleListings)
+            .where(eq(resaleListings.id, listingId));
+
+        revalidatePath("/auto-ads/resales");
+        return {success: true};
+    } catch (err) {
+        console.error("Failed to delete resale listing:", err);
+        return {success: false, error: err instanceof Error ? err.message : String(err)};
+    }
+}
+
 // DELETE LISTING IMAGE
 export async function deleteListingImage(imageId: number): Promise<{
     success: boolean;
@@ -329,6 +483,244 @@ export async function detectNumberplateFromFile(formData: FormData): Promise<{
         return {success: true, numberplate: plate};
     } catch (err) {
         console.error("Failed to detect numberplate from file:", err);
+        return {success: false, error: err instanceof Error ? err.message : String(err)};
+    }
+}
+
+// GENERATE RESALE DESCRIPTION
+export async function generateResaleDescription(
+    formData: ResaleListingData,
+): Promise<{success: boolean; description?: string; error?: string}> {
+    /**
+     * Fetches all images for the resale listing (if it has been saved), then
+     * calls the Gemini API with the vehicle details and those images to produce
+     * a compelling listing description. Returns the generated text or an error.
+     */
+
+    const session = await getServerSessionFromCookies();
+    if (!session) {
+        return {success: false, error: "Not authenticated"};
+    }
+
+    try {
+        // fetch image urls for the listing if it already exists
+        let imageUrls: string[] = [];
+        if (formData.id) {
+            const imageRows = await getAutoAdsDb()
+                .select({url: images.url})
+                .from(images)
+                .where(
+                    and(
+                        eq(images.listingTable, "Resale"),
+                        eq(images.listingId, formData.id),
+                    )
+                )
+                .orderBy(asc(images.id));
+            imageUrls = imageRows.map((r) => r.url);
+        }
+
+        const description = await generateDescription(
+            {
+                makeAndModel: formData.makeAndModel,
+                shortDescription: formData.shortDescription,
+                year: formData.year,
+                registration: formData.registration,
+                colour: formData.colour,
+                bodyType: formData.bodyType,
+                cabType: formData.cabType,
+                fuelType: formData.fuelType,
+                gearboxType: formData.gearboxType,
+                engineSize: formData.engineSize,
+                seats: formData.seats,
+                mileage: formData.mileage,
+                mileageUnit: formData.mileageUnit,
+                numberOfOwners: formData.numberOfOwners,
+                serviceHistory: formData.serviceHistory,
+                basicHistoryCheck: formData.basicHistoryCheck,
+                motStatus: formData.motStatus,
+                motExpiry: formData.motExpiry,
+                taxStatus: formData.taxStatus,
+                emissionClass: formData.emissionClass,
+                location: formData.location,
+                specsAndFeatures: formData.specsAndFeatures,
+            },
+            imageUrls,
+        );
+
+        if (!description) {
+            return {success: false, error: "Gemini returned an empty description"};
+        }
+
+        return {success: true, description};
+    } catch (err) {
+        console.error("Failed to generate resale description:", err);
+        return {success: false, error: err instanceof Error ? err.message : String(err)};
+    }
+}
+
+// GENERATE RESALE SELL PRICE
+export async function generateResaleSellPrice(
+    formData: ResaleListingData,
+): Promise<{success: boolean; low?: number; high?: number; error?: string}> {
+    /**
+     * Fetches all images for the resale listing (if it has been saved), then
+     * calls the Gemini API with the vehicle details and those images to produce
+     * a suggested retail selling price range. Returns the low and high bounds
+     * in GBP, or an error if the API call or response parsing fails.
+     */
+
+    const session = await getServerSessionFromCookies();
+    if (!session) {
+        return {success: false, error: "Not authenticated"};
+    }
+
+    try {
+        // fetch image urls for the listing if it already exists
+        let imageUrls: string[] = [];
+        if (formData.id) {
+            const imageRows = await getAutoAdsDb()
+                .select({url: images.url})
+                .from(images)
+                .where(
+                    and(
+                        eq(images.listingTable, "Resale"),
+                        eq(images.listingId, formData.id),
+                    )
+                )
+                .orderBy(asc(images.id));
+            imageUrls = imageRows.map((r) => r.url);
+        }
+
+        const range = await suggestSellingPrice(
+            {
+                makeAndModel: formData.makeAndModel,
+                shortDescription: formData.shortDescription,
+                year: formData.year,
+                registration: formData.registration,
+                colour: formData.colour,
+                bodyType: formData.bodyType,
+                cabType: formData.cabType,
+                fuelType: formData.fuelType,
+                gearboxType: formData.gearboxType,
+                engineSize: formData.engineSize,
+                seats: formData.seats,
+                mileage: formData.mileage,
+                mileageUnit: formData.mileageUnit,
+                numberOfOwners: formData.numberOfOwners,
+                serviceHistory: formData.serviceHistory,
+                basicHistoryCheck: formData.basicHistoryCheck,
+                motStatus: formData.motStatus,
+                motExpiry: formData.motExpiry,
+                taxStatus: formData.taxStatus,
+                emissionClass: formData.emissionClass,
+                location: formData.location,
+                specsAndFeatures: formData.specsAndFeatures,
+            },
+            imageUrls,
+        );
+
+        if (!range) {
+            return {success: false, error: "Gemini returned an unparseable price range"};
+        }
+
+        return {success: true, low: range.low, high: range.high};
+    } catch (err) {
+        console.error("Failed to generate resale sell price:", err);
+        return {success: false, error: err instanceof Error ? err.message : String(err)};
+    }
+}
+
+// TO MIXED CASE
+function toMixedCase(value: string): string {
+    /**
+     * Converts an all-uppercase string from the DVLA API into title case,
+     * capitalising the first letter of each word and lowercasing the rest.
+     * Numeric tokens (e.g. "2") are left unchanged.
+     */
+
+    return value
+        .split(" ")
+        .map(word => word.length > 0 ? word[0].toUpperCase() + word.slice(1).toLowerCase() : word)
+        .join(" ");
+}
+
+// DVLA VEHICLE DATA
+export interface DvlaVehicleData {
+    /**
+     * Subset of DVLA response fields mapped to prospectListing column names,
+     * ready for the UI to merge into the editor form state.
+     */
+
+    makeAndModel: string | null;
+    year: number | null;
+    colour: string | null;
+    fuelType: string | null;
+    wheelplan: string | null;
+    engineSize: string | null;
+    motStatus: string | null;
+    motExpiry: string | null;
+    emissionClass: string | null;
+    taxStatus: string | null;
+    taxDueDate: string | null;
+    co2Emissions: number | null;
+    markedForExport: boolean | null;
+    dateOfLastV5CIssued: string | null;
+    monthOfFirstRegistration: string | null;
+    typeApproval: string | null;
+    revenueWeight: number | null;
+}
+
+// LOOKUP REGISTRATION
+export async function lookupRegistration(registrationNumber: string): Promise<{
+    success: boolean;
+    data?: DvlaVehicleData;
+    error?: string;
+}> {
+    /**
+     * Calls the DVLA Vehicle Enquiry Service for the given registration and
+     * maps the response into field names matching the prospect listing form.
+     * Engine capacity is formatted as e.g. "1796cc" for display.
+     */
+
+    const session = await getServerSessionFromCookies();
+    if (!session) {
+        return {success: false, error: "Not authenticated"};
+    }
+
+    try {
+        const vehicle = await lookupVehicle(registrationNumber);
+
+        console.log("DVLA vehicle enquiry response:", vehicle);
+
+        // normalise uppercase dvla strings to mixed case, with fuel type alias
+        const rawFuel = vehicle.fuelType ?? null;
+        const normalisedFuel = rawFuel
+            ? (rawFuel.toUpperCase() === "ELECTRICITY" ? "Electric" : toMixedCase(rawFuel))
+            : null;
+
+        const data: DvlaVehicleData = {
+            makeAndModel: vehicle.make ? toMixedCase(vehicle.make) : null,
+            year: vehicle.yearOfManufacture ?? null,
+            colour: vehicle.colour ? toMixedCase(vehicle.colour) : null,
+            fuelType: normalisedFuel,
+            wheelplan: vehicle.wheelplan ? toMixedCase(vehicle.wheelplan) : null,
+            engineSize: vehicle.engineCapacity ? `${vehicle.engineCapacity}cc` : null,
+            motStatus: vehicle.motStatus ?? null,
+            motExpiry: vehicle.motExpiryDate ?? null,
+            emissionClass: vehicle.euroStatus ?? null,
+            taxStatus: vehicle.taxStatus ?? null,
+            taxDueDate: vehicle.taxDueDate ?? null,
+            co2Emissions: vehicle.co2Emissions ?? null,
+            markedForExport: vehicle.markedForExport ?? null,
+            dateOfLastV5CIssued: vehicle.dateOfLastV5CIssued ?? null,
+            monthOfFirstRegistration: vehicle.monthOfFirstRegistration ?? null,
+            typeApproval: vehicle.typeApproval ?? null,
+            revenueWeight: vehicle.revenueWeight ?? null,
+        };
+
+        return {success: true, data};
+    } catch (err) {
+        console.error("Failed to look up registration:", err);
         return {success: false, error: err instanceof Error ? err.message : String(err)};
     }
 }

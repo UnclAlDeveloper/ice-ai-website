@@ -141,6 +141,41 @@
       "when": 1772751127096,
       "tag": "0019_chemical_radioactive_man",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1773749315023,
+      "tag": "0020_known_terrax",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1773938637710,
+      "tag": "0021_bored_bromley",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1773942678982,
+      "tag": "0022_faulty_glorian",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1774000000000,
+      "tag": "0023_resale_prospect_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1773943548667,
+      "tag": "0024_free_shinobi_shaw",
+      "breakpoints": true
     }
   ]
 }

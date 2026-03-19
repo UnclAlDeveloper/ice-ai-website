@@ -21,19 +21,21 @@ import SaveIcon from "@mui/icons-material/Save";
 import AddPhotoAlternateIcon from "@mui/icons-material/AddPhotoAlternate";
 import PhotoIcon from "@mui/icons-material/Photo";
 import DeleteIcon from "@mui/icons-material/Delete";
-import {saveProspectListing} from "../manual-entry/actions";
-import type {ProspectListingData} from "../manual-entry/actions";
 import SearchIcon from "@mui/icons-material/Search";
-import {fetchListingImages, uploadListingImage, deleteListingImage, detectNumberplate, lookupRegistration} from "./actions";
+import AutoFixHighIcon from "@mui/icons-material/AutoFixHigh";
+import OpenInNewIcon from "@mui/icons-material/OpenInNew";
+import {saveResaleListing} from "../resales/actions";
+import type {ResaleListingData} from "../resales/actions";
+import {fetchListingImages, uploadListingImage, deleteListingImage, detectNumberplate, lookupRegistration, generateResaleDescription, generateResaleSellPrice} from "./actions";
 import type {DvlaVehicleData} from "./actions";
 import {deriveShortDescription} from "../lib/deriveShortDescription";
 
 // STATUS OPTIONS
-const STATUS_OPTIONS = ["New", "Viewed", "Not Interested", "Interested", "Bought", "Sold"] as const;
-/** All possible prospect listing statuses matching the database enum. */
+const STATUS_OPTIONS = ["Bought", "Sold"] as const;
+/** Resale listing statuses matching the resale_listing_status database enum. */
 
 // AUTOCOMPLETE FIELD CONFIG
-const AUTOCOMPLETE_FIELDS: {key: keyof ProspectListingData; label: string; lookupType: string}[] = [
+const AUTOCOMPLETE_FIELDS: {key: keyof ResaleListingData; label: string; lookupType: string}[] = [
     {key: "makeAndModel", label: "Make & Model", lookupType: "make_and_model"},
     {key: "location", label: "Location", lookupType: "location"},
     {key: "bodyType", label: "Body Type", lookupType: "body_type"},
@@ -47,34 +49,11 @@ const AUTOCOMPLETE_FIELDS: {key: keyof ProspectListingData; label: string; looku
 ];
 /** Maps each autocomplete-enabled field to its display label and lookups table key. */
 
-// INTEGER FIELD CONFIG
-const INTEGER_FIELDS: {key: keyof ProspectListingData; label: string}[] = [
-    {key: "seats", label: "Seats"},
-    {key: "mileage", label: "Mileage"},
-    {key: "year", label: "Year"},
-    {key: "numberOfOwners", label: "Number of Owners"},
-];
-/** Fields rendered as number inputs. */
-
-// TEXT FIELD CONFIG
-const TEXT_FIELDS: {key: keyof ProspectListingData; label: string; multiline?: boolean}[] = [
-    {key: "shortDescription", label: "Short Description"},
-    {key: "registration", label: "Registration"},
-    {key: "mileageUnit", label: "Mileage Unit"},
-    {key: "serviceHistory", label: "Service History"},
-    {key: "basicHistoryCheck", label: "Basic History Check"},
-    {key: "motStatus", label: "MOT Status"},
-    {key: "motExpiry", label: "MOT Expiry"},
-    {key: "fullDescription", label: "Full Description", multiline: true},
-    {key: "specsAndFeatures", label: "Specs & Features", multiline: true},
-];
-/** Fields rendered as plain text inputs, with optional multiline flag. */
-
-// PROSPECT LISTING EDITOR PROPS
-interface ProspectListingEditorProps {
-    data: ProspectListingData;
+// RESALE LISTING EDITOR PROPS
+interface ResaleListingEditorProps {
+    data: ResaleListingData;
     lookupMap: Record<string, string[]>;
-    onSaved?: (data: ProspectListingData) => void;
+    onSaved?: (data: ResaleListingData) => void;
     pendingPrimaryImage?: File | null;
     onPendingImageConsumed?: () => void;
 }
@@ -85,17 +64,17 @@ interface ProspectListingEditorProps {
  * to clear that pending file once it has been uploaded to S3.
  */
 
-// PROSPECT LISTING EDITOR
-export default function ProspectListingEditor({data, lookupMap, onSaved, pendingPrimaryImage, onPendingImageConsumed}: ProspectListingEditorProps) {
+// RESALE LISTING EDITOR
+export default function ResaleListingEditor({data, lookupMap, onSaved, pendingPrimaryImage, onPendingImageConsumed}: ResaleListingEditorProps) {
     /**
-     * Reusable form for editing prospect listing fields. Calls the
-     * saveProspectListing server action directly so the record is always
-     * flushed and committed, returning the database id for new inserts.
-     * Responsive grid layout adapts from single-column on phones to three
-     * columns on laptops.
+     * Form for editing resale listing fields. Calls the saveResaleListing
+     * server action directly so the record is always flushed and committed,
+     * returning the database id for new inserts. Includes the resale-specific
+     * fields (eBayUrl, facebookUrl, adsPrice, aiSellPriceLow/High) and uses
+     * the narrower 'Bought'/'Sold' status enum.
      */
 
-    const [formData, setFormData] = useState<ProspectListingData>(data);
+    const [formData, setFormData] = useState<ResaleListingData>(data);
     const [saving, setSaving] = useState(false);
     const [snackbar, setSnackbar] = useState<{open: boolean; message: string; severity: "success" | "error"}>({
         open: false,
@@ -130,7 +109,7 @@ export default function ProspectListingEditor({data, lookupMap, onSaved, pending
     // load images when the listing id is available or changes
     useEffect(() => {
         if (formData.id) {
-            fetchListingImages("Prospect", formData.id).then((result) => {
+            fetchListingImages("Resale", formData.id).then((result) => {
                 if (result.success && result.images) {
                     setImageList(result.images);
                 }
@@ -141,9 +120,11 @@ export default function ProspectListingEditor({data, lookupMap, onSaved, pending
     }, [formData.id]);
 
     const [lookingUp, setLookingUp] = useState(false);
+    const [generatingDescription, setGeneratingDescription] = useState(false);
+    const [generatingPrice, setGeneratingPrice] = useState(false);
 
     // SET FIELD
-    const setField = (key: keyof ProspectListingData, value: string | number | boolean | null) => {
+    const setField = (key: keyof ResaleListingData, value: string | number | boolean | null) => {
         /**
          * Updates a single field in the local form state.
          */
@@ -168,7 +149,7 @@ export default function ProspectListingEditor({data, lookupMap, onSaved, pending
             for (const key of keys) {
                 const dvlaValue = dvla[key];
                 if (dvlaValue == null) continue;
-                const current = prev[key as keyof ProspectListingData];
+                const current = prev[key as keyof ResaleListingData];
                 const isEmpty = current === null || current === undefined || current === "" || current === 0;
                 if (isEmpty) {
                     (next as Record<string, unknown>)[key] = dvlaValue;
@@ -182,7 +163,7 @@ export default function ProspectListingEditor({data, lookupMap, onSaved, pending
                 if (derived) next.shortDescription = derived;
             }
 
-            return next as ProspectListingData;
+            return next as ResaleListingData;
         });
         return filled;
     };
@@ -211,10 +192,62 @@ export default function ProspectListingEditor({data, lookupMap, onSaved, pending
         }
     };
 
+    // HANDLE GENERATE DESCRIPTION
+    const handleGenerateDescription = async () => {
+        /**
+         * Calls the Gemini API via the server action, passing the current form
+         * data and any uploaded images, then populates the Full Description
+         * field with the returned text.
+         */
+
+        setGeneratingDescription(true);
+        try {
+            const result = await generateResaleDescription(formData);
+            if (result.success && result.description) {
+                setField("fullDescription", result.description);
+                setSnackbar({open: true, message: "Description generated successfully", severity: "success"});
+            } else {
+                setSnackbar({open: true, message: result.error || "Failed to generate description", severity: "error"});
+            }
+        } catch (err) {
+            setSnackbar({open: true, message: err instanceof Error ? err.message : "Unexpected error", severity: "error"});
+        } finally {
+            setGeneratingDescription(false);
+        }
+    };
+
+    // HANDLE GENERATE SELL PRICE
+    const handleGenerateSellPrice = async () => {
+        /**
+         * Calls the Gemini API via the server action to produce a suggested
+         * retail selling price range, then writes the returned low and high
+         * values into the aiSellPriceLow and aiSellPriceHigh form fields.
+         */
+
+        setGeneratingPrice(true);
+        try {
+            const result = await generateResaleSellPrice(formData);
+            if (result.success && result.low !== undefined && result.high !== undefined) {
+                setFormData((prev) => ({...prev, aiSellPriceLow: result.low!, aiSellPriceHigh: result.high!}));
+                setSnackbar({
+                    open: true,
+                    message: `AI suggested sell price: £${result.low.toLocaleString()} – £${result.high.toLocaleString()}`,
+                    severity: "success",
+                });
+            } else {
+                setSnackbar({open: true, message: result.error || "Failed to generate sell price", severity: "error"});
+            }
+        } catch (err) {
+            setSnackbar({open: true, message: err instanceof Error ? err.message : "Unexpected error", severity: "error"});
+        } finally {
+            setGeneratingPrice(false);
+        }
+    };
+
     // HANDLE SUBMIT
     const handleSubmit = async (e: React.FormEvent) => {
         /**
-         * Inserts or updates the prospect listing via the server action. On a
+         * Inserts or updates the resale listing via the server action. On a
          * successful insert the pending primary image (if any) is uploaded to
          * S3 and linked to the new listing before notifying the parent.
          */
@@ -222,14 +255,14 @@ export default function ProspectListingEditor({data, lookupMap, onSaved, pending
         e.preventDefault();
         setSaving(true);
         try {
-            const result = await saveProspectListing(formData);
+            const result = await saveResaleListing(formData);
             if (result.success && result.id) {
                 // upload the pending primary image now that the listing has an id
                 if (pendingPrimaryImage) {
                     const fd = new FormData();
                     fd.append("file", pendingPrimaryImage);
                     fd.append("listingId", String(result.id));
-                    fd.append("listingTable", "Prospect");
+                    fd.append("listingTable", "Resale");
                     fd.append("isPrimary", "true");
                     const uploadResult = await uploadListingImage(fd);
                     if (uploadResult.success && uploadResult.image) {
@@ -268,7 +301,7 @@ export default function ProspectListingEditor({data, lookupMap, onSaved, pending
                 const fd = new FormData();
                 fd.append("file", file);
                 fd.append("listingId", String(formData.id));
-                fd.append("listingTable", "Prospect");
+                fd.append("listingTable", "Resale");
                 fd.append("isPrimary", "false");
 
                 const result = await uploadListingImage(fd);
@@ -302,7 +335,7 @@ export default function ProspectListingEditor({data, lookupMap, onSaved, pending
             const fd = new FormData();
             fd.append("file", files[0]);
             fd.append("listingId", String(formData.id));
-            fd.append("listingTable", "Prospect");
+            fd.append("listingTable", "Resale");
             fd.append("isPrimary", "true");
 
             const result = await uploadListingImage(fd);
@@ -762,9 +795,21 @@ export default function ProspectListingEditor({data, lookupMap, onSaved, pending
 
 
             {/* --- descriptions --- */}
-            <Typography variant="subtitle2" color="text.secondary" sx={{mt: 3, mb: 1}}>
-                Descriptions
-            </Typography>
+            <Box sx={{mt: 3, mb: 1, display: "flex", alignItems: "center", gap: 1}}>
+                <Typography variant="subtitle2" color="text.secondary">
+                    Descriptions
+                </Typography>
+                <Button
+                    size="small"
+                    variant="outlined"
+                    disabled={generatingDescription || !formData.makeAndModel}
+                    onClick={handleGenerateDescription}
+                    startIcon={generatingDescription ? <CircularProgress size={14} /> : <AutoFixHighIcon />}
+                    sx={{ml: "auto"}}
+                >
+                    {generatingDescription ? "Generating…" : "AI Generate"}
+                </Button>
+            </Box>
             <Grid container spacing={2}>
                 <Grid size={wideFieldSize}>
                     <TextField
@@ -790,6 +835,101 @@ export default function ProspectListingEditor({data, lookupMap, onSaved, pending
                     />
                 </Grid>
             </Grid>
+
+
+            {/* --- pricing --- */}
+            <Box sx={{mt: 3, mb: 1, display: "flex", alignItems: "center", gap: 1}}>
+                <Typography variant="subtitle2" color="text.secondary">
+                    Pricing
+                </Typography>
+                <Button
+                    size="small"
+                    variant="outlined"
+                    disabled={generatingPrice || !formData.makeAndModel}
+                    onClick={handleGenerateSellPrice}
+                    startIcon={generatingPrice ? <CircularProgress size={14} /> : <AutoFixHighIcon />}
+                    sx={{ml: "auto"}}
+                >
+                    {generatingPrice ? "Generating…" : "AI Price"}
+                </Button>
+            </Box>
+            <Grid container spacing={2}>
+                <Grid size={fieldSize}>
+                    <TextField
+                        label="Ads Price"
+                        size="small"
+                        fullWidth
+                        type="number"
+                        value={formData.adsPrice ?? ""}
+                        onChange={(e) => setField("adsPrice", e.target.value ? parseInt(e.target.value, 10) : null)}
+                    />
+                </Grid>
+
+                {formData.aiSellPriceLow !== null && formData.aiSellPriceHigh !== null && (
+                    <Grid size={wideFieldSize}>
+                        <Typography variant="body2" color="text.primary">
+                            <strong>AI Suggested Sell Price:</strong>{" "}
+                            £{formData.aiSellPriceLow.toLocaleString()} to £{formData.aiSellPriceHigh.toLocaleString()}{" "}
+                            (avg £{Math.round((formData.aiSellPriceLow + formData.aiSellPriceHigh) / 2).toLocaleString()})
+                        </Typography>
+                    </Grid>
+                )}
+
+                <Grid size={fieldSize}>
+                    <TextField
+                        label="Asking Price"
+                        size="small"
+                        fullWidth
+                        type="number"
+                        value={formData.askingPrice ?? ""}
+                        onChange={(e) => setField("askingPrice", e.target.value ? parseInt(e.target.value, 10) : null)}
+                    />
+                </Grid>
+            </Grid>
+
+            {/* --- listings --- */}
+            <Typography variant="subtitle2" color="text.secondary" sx={{mt: 3, mb: 1}}>
+                Listings
+            </Typography>
+            <Box sx={{display: "flex", flexDirection: "column", gap: 1}}>
+                <Box sx={{display: "flex", alignItems: "center", gap: 1}}>
+                    <Typography variant="body2" sx={{minWidth: 70}}>eBay</Typography>
+                    {formData.eBayUrl && (
+                        <Typography
+                            component="a"
+                            href={formData.eBayUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            variant="body2"
+                            sx={{display: "flex", alignItems: "center", gap: 0.5, mr: 1}}
+                        >
+                            View listing <OpenInNewIcon sx={{fontSize: 14}} />
+                        </Typography>
+                    )}
+                    <Button size="small" variant="outlined">
+                        {formData.eBayUrl ? "Update" : "Create"}
+                    </Button>
+                </Box>
+
+                <Box sx={{display: "flex", alignItems: "center", gap: 1}}>
+                    <Typography variant="body2" sx={{minWidth: 70}}>Facebook</Typography>
+                    {formData.facebookUrl && (
+                        <Typography
+                            component="a"
+                            href={formData.facebookUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            variant="body2"
+                            sx={{display: "flex", alignItems: "center", gap: 0.5, mr: 1}}
+                        >
+                            View listing <OpenInNewIcon sx={{fontSize: 14}} />
+                        </Typography>
+                    )}
+                    <Button size="small" variant="outlined">
+                        {formData.facebookUrl ? "Update" : "Create"}
+                    </Button>
+                </Box>
+            </Box>
 
             {/* --- save --- */}
             <Box sx={{mt: 3, display: "flex", justifyContent: "flex-end"}}>

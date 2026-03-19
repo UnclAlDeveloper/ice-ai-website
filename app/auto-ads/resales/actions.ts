@@ -1,15 +1,15 @@
 "use server";
 
-import {randomBytes} from "crypto";
 import {getAutoAdsDb} from "@app/lib/autoAdsDb";
-import {prospectListings, lookups} from "@/drizzle/auto-ads/schema";
-import {eq, and, ne, inArray} from "drizzle-orm";
+import {resaleListings} from "@/drizzle/auto-ads/schema";
+import {eq, ne} from "drizzle-orm";
 import {getServerSessionFromCookies} from "@app/lib/session";
 import {revalidatePath} from "next/cache";
 
-// PROSPECT LISTING DATA
-export type ProspectListingData = {
+// RESALE LISTING DATA
+export type ResaleListingData = {
     id?: number;
+    prospectId?: number | null;
     status: string;
     makeAndModel: string;
     shortDescription: string;
@@ -45,22 +45,29 @@ export type ProspectListingData = {
     monthOfFirstRegistration: string | null;
     typeApproval: string | null;
     revenueWeight: number | null;
+    aiSellPriceLow: number | null;
+    aiSellPriceHigh: number | null;
+    adsPrice: number | null;
+    eBayUrl: string;
+    facebookUrl: string;
 };
 /**
- * Shape of prospect listing data sent from the editor form.
- * Includes an optional `id` to distinguish inserts from updates.
+ * Shape of resale listing data sent from and returned to the editor form.
+ * Includes an optional `id` to distinguish inserts from updates. Compared to
+ * prospect listings, the status enum is narrower ('Bought' | 'Sold') and the
+ * resale-specific fields eBayUrl, facebookUrl, and adsPrice are present.
  */
 
-// GET MANUAL ENTRY LISTINGS
-export async function getManualEntryListings(): Promise<{
+// GET RESALE LISTINGS
+export async function getResaleListings(): Promise<{
     success: boolean;
     listings?: {id: number; makeAndModel: string; shortDescription: string; registration: string | null}[];
     error?: string;
 }> {
     /**
-     * Fetches all prospect listings with source "ManualEntry" and a status
-     * other than "Sold", returning the id, make/model, short description, and
-     * registration for use in the listing selector dropdown.
+     * Fetches all resale listings with a status other than 'Sold', returning
+     * the id, make/model, short description, and registration for use in the
+     * listing selector dropdown.
      */
 
     const session = await getServerSessionFromCookies();
@@ -71,76 +78,29 @@ export async function getManualEntryListings(): Promise<{
     try {
         const rows = await getAutoAdsDb()
             .select({
-                id: prospectListings.id,
-                makeAndModel: prospectListings.makeAndModel,
-                shortDescription: prospectListings.shortDescription,
-                registration: prospectListings.registration,
+                id: resaleListings.id,
+                makeAndModel: resaleListings.makeAndModel,
+                shortDescription: resaleListings.shortDescription,
+                registration: resaleListings.registration,
             })
-            .from(prospectListings)
-            .where(
-                and(
-                    eq(prospectListings.listingSource, "ManualEntry"),
-                    ne(prospectListings.status, "Sold"),
-                )
-            );
+            .from(resaleListings)
+            .where(ne(resaleListings.status, "Sold"));
 
         return {success: true, listings: rows};
     } catch (err) {
-        console.error("Failed to fetch manual entry listings:", err);
+        console.error("Failed to fetch resale listings:", err);
         return {success: false, error: err instanceof Error ? err.message : String(err)};
     }
 }
 
-// GET LOOKUP VALUES
-export async function getLookupValues(lookupTypes: string[]): Promise<{
+// GET RESALE LISTING
+export async function getResaleListing(id: number): Promise<{
     success: boolean;
-    lookupMap?: Record<string, string[]>;
+    listing?: ResaleListingData;
     error?: string;
 }> {
     /**
-     * Fetches lookup codes for the given lookup types in a single query,
-     * returning a map of lookupType to an array of code strings.
-     */
-
-    const session = await getServerSessionFromCookies();
-    if (!session) {
-        return {success: false, error: "Not authenticated"};
-    }
-
-    try {
-        const rows = await getAutoAdsDb()
-            .select({
-                lookupType: lookups.lookupType,
-                code: lookups.code,
-            })
-            .from(lookups)
-            .where(inArray(lookups.lookupType, lookupTypes));
-
-        const lookupMap: Record<string, string[]> = {};
-        for (const type of lookupTypes) {
-            lookupMap[type] = [];
-        }
-        for (const row of rows) {
-            if (lookupMap[row.lookupType]) {
-                lookupMap[row.lookupType].push(row.code);
-            }
-        }
-
-        return {success: true, lookupMap};
-    } catch (err) {
-        console.error("Failed to fetch lookup values:", err);
-        return {success: false, error: err instanceof Error ? err.message : String(err)};
-    }
-}
-
-// GET PROSPECT LISTING
-export async function getProspectListing(id: number): Promise<{
-    success: boolean;
-    listing?: ProspectListingData;
-    error?: string;
-}> {
-    /**
-     * Fetches a single prospect listing by id for editing, returning only the
+     * Fetches a single resale listing by id for editing, returning only the
      * fields relevant to the editor form.
      */
 
@@ -152,45 +112,51 @@ export async function getProspectListing(id: number): Promise<{
     try {
         const [row] = await getAutoAdsDb()
             .select({
-                id: prospectListings.id,
-                status: prospectListings.status,
-                makeAndModel: prospectListings.makeAndModel,
-                shortDescription: prospectListings.shortDescription,
-                fullDescription: prospectListings.fullDescription,
-                mileage: prospectListings.mileage,
-                mileageUnit: prospectListings.mileageUnit,
-                year: prospectListings.year,
-                registration: prospectListings.registration,
-                currencySymbol: prospectListings.currencySymbol,
-                askingPrice: prospectListings.askingPrice,
-                vatStatus: prospectListings.vatStatus,
-                location: prospectListings.location,
-                bodyType: prospectListings.bodyType,
-                cabType: prospectListings.cabType,
-                fuelType: prospectListings.fuelType,
-                gearboxType: prospectListings.gearboxType,
-                wheelbase: prospectListings.wheelbase,
-                engineSize: prospectListings.engineSize,
-                colour: prospectListings.colour,
-                seats: prospectListings.seats,
-                emissionClass: prospectListings.emissionClass,
-                numberOfOwners: prospectListings.numberOfOwners,
-                serviceHistory: prospectListings.serviceHistory,
-                basicHistoryCheck: prospectListings.basicHistoryCheck,
-                motStatus: prospectListings.motStatus,
-                motExpiry: prospectListings.motExpiry,
-                specsAndFeatures: prospectListings.specsAndFeatures,
-                taxStatus: prospectListings.taxStatus,
-                taxDueDate: prospectListings.taxDueDate,
-                co2Emissions: prospectListings.co2Emissions,
-                markedForExport: prospectListings.markedForExport,
-                dateOfLastV5CIssued: prospectListings.dateOfLastV5CIssued,
-                monthOfFirstRegistration: prospectListings.monthOfFirstRegistration,
-                typeApproval: prospectListings.typeApproval,
-                revenueWeight: prospectListings.revenueWeight,
+                id: resaleListings.id,
+                prospectId: resaleListings.prospectId,
+                status: resaleListings.status,
+                makeAndModel: resaleListings.makeAndModel,
+                shortDescription: resaleListings.shortDescription,
+                fullDescription: resaleListings.fullDescription,
+                mileage: resaleListings.mileage,
+                mileageUnit: resaleListings.mileageUnit,
+                year: resaleListings.year,
+                registration: resaleListings.registration,
+                currencySymbol: resaleListings.currencySymbol,
+                askingPrice: resaleListings.askingPrice,
+                vatStatus: resaleListings.vatStatus,
+                location: resaleListings.location,
+                bodyType: resaleListings.bodyType,
+                cabType: resaleListings.cabType,
+                fuelType: resaleListings.fuelType,
+                gearboxType: resaleListings.gearboxType,
+                wheelbase: resaleListings.wheelbase,
+                engineSize: resaleListings.engineSize,
+                colour: resaleListings.colour,
+                seats: resaleListings.seats,
+                emissionClass: resaleListings.emissionClass,
+                numberOfOwners: resaleListings.numberOfOwners,
+                serviceHistory: resaleListings.serviceHistory,
+                basicHistoryCheck: resaleListings.basicHistoryCheck,
+                motStatus: resaleListings.motStatus,
+                motExpiry: resaleListings.motExpiry,
+                specsAndFeatures: resaleListings.specsAndFeatures,
+                taxStatus: resaleListings.taxStatus,
+                taxDueDate: resaleListings.taxDueDate,
+                co2Emissions: resaleListings.co2Emissions,
+                markedForExport: resaleListings.markedForExport,
+                dateOfLastV5CIssued: resaleListings.dateOfLastV5CIssued,
+                monthOfFirstRegistration: resaleListings.monthOfFirstRegistration,
+                typeApproval: resaleListings.typeApproval,
+                revenueWeight: resaleListings.revenueWeight,
+                aiSellPriceLow: resaleListings.aiSellPriceLow,
+                aiSellPriceHigh: resaleListings.aiSellPriceHigh,
+                adsPrice: resaleListings.adsPrice,
+                eBayUrl: resaleListings.eBayUrl,
+                facebookUrl: resaleListings.facebookUrl,
             })
-            .from(prospectListings)
-            .where(eq(prospectListings.id, id));
+            .from(resaleListings)
+            .where(eq(resaleListings.id, id));
 
         if (!row) {
             return {success: false, error: "Listing not found"};
@@ -198,21 +164,21 @@ export async function getProspectListing(id: number): Promise<{
 
         return {success: true, listing: row};
     } catch (err) {
-        console.error("Failed to fetch prospect listing:", err);
+        console.error("Failed to fetch resale listing:", err);
         return {success: false, error: err instanceof Error ? err.message : String(err)};
     }
 }
 
-// SAVE PROSPECT LISTING
-export async function saveProspectListing(data: ProspectListingData): Promise<{
+// SAVE RESALE LISTING
+export async function saveResaleListing(data: ResaleListingData): Promise<{
     success: boolean;
     id?: number;
     error?: string;
 }> {
     /**
-     * Inserts a new prospect listing or updates an existing one. New listings
-     * get a random 16-char hex hash code and fixed defaults for source, url,
-     * and timestamps. Updates only touch the editable fields and updatedAt.
+     * Inserts a new resale listing or updates an existing one. New listings
+     * get a random 16-char hex hash code and fixed defaults for timestamps.
+     * Updates only touch the editable fields and updatedAt.
      */
 
     const session = await getServerSessionFromCookies();
@@ -226,9 +192,9 @@ export async function saveProspectListing(data: ProspectListingData): Promise<{
         if (data.id) {
             // update existing listing
             await getAutoAdsDb()
-                .update(prospectListings)
+                .update(resaleListings)
                 .set({
-                    status: data.status as typeof prospectListings.$inferInsert.status,
+                    status: data.status as typeof resaleListings.$inferInsert.status,
                     makeAndModel: data.makeAndModel,
                     shortDescription: data.shortDescription,
                     fullDescription: data.fullDescription,
@@ -263,29 +229,29 @@ export async function saveProspectListing(data: ProspectListingData): Promise<{
                     monthOfFirstRegistration: data.monthOfFirstRegistration,
                     typeApproval: data.typeApproval,
                     revenueWeight: data.revenueWeight,
+                    aiSellPriceLow: data.aiSellPriceLow,
+                    aiSellPriceHigh: data.aiSellPriceHigh,
+                    adsPrice: data.adsPrice,
+                    eBayUrl: data.eBayUrl,
+                    facebookUrl: data.facebookUrl,
                     updatedAt: now,
                 })
-                .where(eq(prospectListings.id, data.id));
+                .where(eq(resaleListings.id, data.id));
 
-            revalidatePath("/auto-ads/manual-entry");
-            revalidatePath("/auto-ads/prospects");
+            revalidatePath("/auto-ads/resales");
             return {success: true, id: data.id};
         }
 
         // insert new listing
-        const hashCode = randomBytes(8).toString("hex");
-
         const [inserted] = await getAutoAdsDb()
-            .insert(prospectListings)
+            .insert(resaleListings)
             .values({
-                hashCode,
                 createdAt: now,
                 updatedAt: now,
                 listingSource: "ManualEntry",
-                status: data.status as typeof prospectListings.$inferInsert.status,
+                status: data.status as typeof resaleListings.$inferInsert.status,
                 makeAndModel: data.makeAndModel,
                 shortDescription: data.shortDescription,
-                url: "",
                 fullDescription: data.fullDescription,
                 mileage: data.mileage,
                 mileageUnit: data.mileageUnit,
@@ -318,14 +284,18 @@ export async function saveProspectListing(data: ProspectListingData): Promise<{
                 monthOfFirstRegistration: data.monthOfFirstRegistration,
                 typeApproval: data.typeApproval,
                 revenueWeight: data.revenueWeight,
+                aiSellPriceLow: data.aiSellPriceLow,
+                aiSellPriceHigh: data.aiSellPriceHigh,
+                adsPrice: data.adsPrice,
+                eBayUrl: data.eBayUrl,
+                facebookUrl: data.facebookUrl,
             })
-            .returning({id: prospectListings.id});
+            .returning({id: resaleListings.id});
 
-        revalidatePath("/auto-ads/manual-entry");
-        revalidatePath("/auto-ads/prospects");
+        revalidatePath("/auto-ads/resales");
         return {success: true, id: inserted.id};
     } catch (err) {
-        console.error("Failed to save prospect listing:", err);
+        console.error("Failed to save resale listing:", err);
         return {success: false, error: err instanceof Error ? err.message : String(err)};
     }
 }

@@ -73,7 +73,12 @@ export default async function Page({
 
             let whereConditions;
 
-            if (filter === 'classic-cars') {
+            if (filter === 'stock') {
+                // stock filter: listings that have been bought
+                whereConditions = [
+                    eq(prospectListings.status, 'Bought'),
+                ];
+            } else if (filter === 'classic-cars') {
                 // classic cars filter: Cars&Classic source with active statuses and required AI pricing/notes
                 whereConditions = [
                     eq(prospectListings.listingSource, 'Car&Classic'),
@@ -115,23 +120,25 @@ export default async function Page({
 
             totalCount = countResult ?? 0;
 
-            // build sort order, accounting for classic-cars having a different suggested formula
+            // build sort order, accounting for filter-specific suggested formulas
             const orderByClause =
                 sort === 'latest'
                     ? [desc(prospectListings.updatedAt)]
                     : sort === 'alphabetical'
                       ? [asc(sql`${prospectListings.makeAndModel} || ${prospectListings.shortDescription}`)]
-                      : filter === 'classic-cars'
-                        ? [
-                              desc(
-                                  sql`(${prospectListings.aiSellPriceLow} + ${prospectListings.aiSellPriceHigh}) / 2 * 0.9 - ${prospectListings.aiRepairCost} - ${prospectListings.askingPrice}`
-                              ),
-                          ]
-                        : [
-                              desc(
-                                  sql`(${prospectListings.aiBuyPriceLow} + ${prospectListings.aiBuyPriceHigh})::float / ${prospectListings.askingPrice}`
-                              ),
-                          ];
+                      : filter === 'stock'
+                        ? [desc(prospectListings.updatedAt)]
+                        : filter === 'classic-cars'
+                          ? [
+                                desc(
+                                    sql`(${prospectListings.aiSellPriceLow} + ${prospectListings.aiSellPriceHigh}) / 2 * 0.9 - ${prospectListings.aiRepairCost} - ${prospectListings.askingPrice}`
+                                ),
+                            ]
+                          : [
+                                desc(
+                                    sql`(${prospectListings.aiBuyPriceLow} + ${prospectListings.aiBuyPriceHigh})::float / ${prospectListings.askingPrice}`
+                                ),
+                            ];
 
             listings = await getAutoAdsDb()
                 .select()
@@ -205,13 +212,15 @@ export default async function Page({
                     </Typography>
                 ) : listings.length === 0 ? (
                     <Typography>
-                        {resolvedSearchParams?.filter === 'classic-cars'
-                            ? 'No classic car prospects found with status "New" or "Viewed".'
-                            : resolvedSearchParams?.filter === 'campervan-conversions'
-                              ? 'No prospects found with status "New" or "Viewed" that have campervan conversion information.'
-                              : resolvedSearchParams?.filter === 'all'
-                                ? 'No prospects found with status "New" or "Viewed".'
-                                : 'No suggested prospects found with status "New" or "Viewed".'}
+                        {resolvedSearchParams?.filter === 'stock'
+                            ? 'No stock found with status "Bought".'
+                            : resolvedSearchParams?.filter === 'classic-cars'
+                              ? 'No classic car prospects found with status "New" or "Viewed".'
+                              : resolvedSearchParams?.filter === 'campervan-conversions'
+                                ? 'No prospects found with status "New" or "Viewed" that have campervan conversion information.'
+                                : resolvedSearchParams?.filter === 'all'
+                                  ? 'No prospects found with status "New" or "Viewed".'
+                                  : 'No suggested prospects found with status "New" or "Viewed".'}
                     </Typography>
                 ) : (
                     <>
@@ -223,6 +232,7 @@ export default async function Page({
                                         key={listing.id}
                                         listing={listing}
                                         imageUrl={image?.url || null}
+                                        showCopyToResale={resolvedSearchParams?.filter === 'stock'}
                                     />
                                 );
                             })}

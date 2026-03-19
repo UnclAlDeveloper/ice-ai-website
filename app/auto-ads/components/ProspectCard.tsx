@@ -13,7 +13,7 @@ import {InferSelectModel} from "drizzle-orm";
 import {playTextAsSpeech, getCurrentPlayingText, stopCurrentAudio} from "../lib/textToSpeech";
 import {useSession} from "@app/lib/useSession";
 import {getUserTier, compareTiers} from "@app/lib/menuUtils";
-import {updateProspectInterest, fetchListingImages} from "./actions";
+import {updateProspectInterest, fetchListingImages, copyProspectToResale} from "./actions";
 
 
 // STATUS COLOR MAP
@@ -105,9 +105,10 @@ const speakText = async (text: string, onEnded?: () => void): Promise<{success: 
 interface ProspectCardProps {
     listing: InferSelectModel<typeof prospectListings>;
     imageUrl?: string | null;
+    showCopyToResale?: boolean;
 }
 
-export default function ProspectCard({listing, imageUrl}: ProspectCardProps) {
+export default function ProspectCard({listing, imageUrl, showCopyToResale}: ProspectCardProps) {
     /**
      * Displays a single prospect listing in a card format, showing key details
      * such as make and model, description, year, mileage, price, location, status,
@@ -129,6 +130,8 @@ export default function ProspectCard({listing, imageUrl}: ProspectCardProps) {
     const [adsEstSellPrice, setAdsEstSellPrice] = useState<string>(listing.adsEstSellPrice?.toString() || '');
     const [localStatus, setLocalStatus] = useState<string>(listing.status);
     const [saving, setSaving] = useState(false);
+    const [copying, setCopying] = useState(false);
+    const [copiedToResale, setCopiedToResale] = useState(false);
     const [galleryOpen, setGalleryOpen] = useState(false);
     const [galleryImages, setGalleryImages] = useState<{id: number; url: string; isPrimary: boolean | null}[]>([]);
     const [galleryLoading, setGalleryLoading] = useState(false);
@@ -214,6 +217,29 @@ export default function ProspectCard({listing, imageUrl}: ProspectCardProps) {
             console.error("Failed to save prospect interest:", err);
         } finally {
             setSaving(false);
+        }
+    };
+
+    // HANDLE COPY TO RESALE
+    const handleCopyToResale = async () => {
+        /**
+         * Copies the prospect listing into the resale_listings table via the
+         * server action. Marks the button as copied on success so it cannot
+         * be pressed a second time in the same session.
+         */
+
+        setCopying(true);
+        try {
+            const result = await copyProspectToResale(listing.id);
+            if (result.success) {
+                setCopiedToResale(true);
+            } else {
+                console.error("Failed to copy to resale:", result.error);
+            }
+        } catch (err) {
+            console.error("Failed to copy to resale:", err);
+        } finally {
+            setCopying(false);
         }
     };
 
@@ -856,6 +882,16 @@ export default function ProspectCard({listing, imageUrl}: ProspectCardProps) {
                         >
                             {saving ? 'Saving...' : 'Save'}
                         </Button>
+                        {showCopyToResale && (
+                            <Button
+                                variant="outlined"
+                                size="small"
+                                onClick={handleCopyToResale}
+                                disabled={copying || copiedToResale}
+                            >
+                                {copying ? 'Copying…' : copiedToResale ? 'Copied to Resales' : 'Copy to Resales'}
+                            </Button>
+                        )}
                     </Box>
                 </Box>
             </CardContent>

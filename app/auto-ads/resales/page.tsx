@@ -2,11 +2,11 @@ import React from "react";
 import {getServerSessionFromCookies} from "@app/lib/session";
 import {Typography, Box} from "@mui/material";
 import {getAutoAdsDb} from "@app/lib/autoAdsDb";
-import {prospectListings, lookups} from "@/drizzle/auto-ads/schema";
-import {eq, and, ne, inArray} from "drizzle-orm";
+import {resaleListings, lookups} from "@/drizzle/auto-ads/schema";
+import {ne, inArray} from "drizzle-orm";
 import ErrorBar from "@components/ErrorBar";
 import {getUserTier, compareTiers} from "@app/lib/menuUtils";
-import ManualEntryClient from "./ManualEntryClient";
+import ResalesClient from "./ResalesClient";
 
 // LOOKUP TYPES
 const LOOKUP_TYPES = [
@@ -27,8 +27,8 @@ const LOOKUP_TYPES = [
 // PAGE
 export default async function Page() {
     /**
-     * Server component for the Manual Entry page. Authenticates the user,
-     * checks for BasicTier access, fetches existing manual-entry listings
+     * Server component for the Resales page. Authenticates the user, checks
+     * for BasicTier access, fetches existing resale listings (status != Sold)
      * and lookup values, then renders the client-side editor shell.
      */
 
@@ -37,7 +37,7 @@ export default async function Page() {
     if (!session) {
         return (
             <>
-                <Typography variant="h3">Manual Entry</Typography>
+                <Typography variant="h3">Resales</Typography>
                 <Typography>You must be logged in to access this page.</Typography>
             </>
         );
@@ -48,7 +48,7 @@ export default async function Page() {
     if (!compareTiers(userTier, 'BasicTier')) {
         return (
             <>
-                <Typography variant="h3">Manual Entry</Typography>
+                <Typography variant="h3">Resales</Typography>
                 <Typography>You must have BasicTier or higher to access this page.</Typography>
             </>
         );
@@ -59,22 +59,17 @@ export default async function Page() {
     let error: string | null = null;
 
     try {
-        // fetch manual entry listings and lookup values in parallel
+        // fetch resale listings and lookup values in parallel
         const [listingsResult, lookupRows] = await Promise.all([
             getAutoAdsDb()
                 .select({
-                    id: prospectListings.id,
-                    makeAndModel: prospectListings.makeAndModel,
-                    shortDescription: prospectListings.shortDescription,
-                    registration: prospectListings.registration,
+                    id: resaleListings.id,
+                    makeAndModel: resaleListings.makeAndModel,
+                    shortDescription: resaleListings.shortDescription,
+                    registration: resaleListings.registration,
                 })
-                .from(prospectListings)
-                .where(
-                    and(
-                        eq(prospectListings.listingSource, "ManualEntry"),
-                        ne(prospectListings.status, "Sold"),
-                    )
-                ),
+                .from(resaleListings)
+                .where(ne(resaleListings.status, "Sold")),
             getAutoAdsDb()
                 .select({
                     lookupType: lookups.lookupType,
@@ -101,14 +96,14 @@ export default async function Page() {
     return (
         <>
             <Box sx={{pb: error ? '120px' : 0}}>
-                <Typography variant="h3" sx={{mb: 2}}>Manual Entry</Typography>
+                <Typography variant="h3" sx={{mb: 2}}>Resales</Typography>
 
                 {error ? (
                     <Typography color="error" sx={{mt: 2}}>
                         Error loading data. See error bar below for details.
                     </Typography>
                 ) : (
-                    <ManualEntryClient
+                    <ResalesClient
                         existingListings={existingListings}
                         lookupMap={lookupMap}
                     />

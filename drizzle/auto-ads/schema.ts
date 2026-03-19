@@ -1,4 +1,4 @@
-import { pgSchema, serial, varchar, boolean, timestamp, integer, index, unique, char, date, smallint, text } from "drizzle-orm/pg-core"
+import {pgSchema, serial, varchar, boolean, timestamp, integer, index, unique, char, date, smallint, text} from "drizzle-orm/pg-core"
 
 export const aa = pgSchema("aa");
 export const listingSource = aa.enum(
@@ -9,6 +9,10 @@ export const listingTable = aa.enum("listing_table", ['Prospect', 'Resale'])
 export const prospectListingStatus = aa.enum(
 	"prospect_listing_status",
 	['New', 'Viewed', 'Not Interested', 'Interested', 'Bought', 'Sold']
+)
+export const resaleListingStatus = aa.enum(
+	"resale_listing_status",
+	['Bought', 'Sold']
 )
 
 export const lookups = aa.table("lookups", {
@@ -82,10 +86,70 @@ export const prospectListings = aa.table("prospect_listings", {
 	aiTargetMarket: varchar("ai_target_market"),
 	adsEstBuyPrice: integer("ads_est_buy_price"),
 	adsEstSellPrice: integer("ads_est_sell_price"),
+	taxStatus: varchar("tax_status"),
+	taxDueDate: date("tax_due_date"),
+	co2Emissions: integer("co2_emissions"),
+	markedForExport: boolean("marked_for_export"),
+	dateOfLastV5CIssued: date("date_of_last_v5c_issued"),
+	monthOfFirstRegistration: varchar("month_of_first_registration"),
+	typeApproval: varchar("type_approval"),
+	revenueWeight: integer("revenue_weight"),
 }, (table) => [
 	index("idx_prospect_listings_hash_code").using("btree", table.hashCode.asc().nullsLast().op("bpchar_ops")),
 	unique("prospect_listings_hash_code_unique").on(table.hashCode),
 ]);
+
+
+export const resaleListings = aa.table("resale_listings", {
+	id: serial().primaryKey().notNull(),
+	prospectId: integer("prospect_id"),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }),
+	listingSource: listingSource("listing_source").notNull(),
+	status: resaleListingStatus().notNull(),
+	makeAndModel: varchar("make_and_model").notNull(),
+	shortDescription: varchar("short_description").notNull(),
+	fullDescription: varchar("full_description"),
+	mileage: integer(),
+	mileageUnit: varchar("mileage_unit"),
+	year: integer(),
+	registration: varchar(),
+	currencySymbol: char("currency_symbol", { length: 1 }),
+	askingPrice: integer("asking_price"),
+	vatStatus: varchar("vat_status"),
+	location: varchar(),
+	driveConfiguration: varchar("drive_configuration"),
+	bodyType: varchar("body_type"),
+	cabType: varchar("cab_type"),
+	fuelType: varchar("fuel_type"),
+	gearboxType: varchar("gearbox_type"),
+	wheelbase: varchar(),
+	engineSize: varchar("engine_size"),
+	colour: varchar(),
+	seats: integer(),
+	emissionClass: varchar("emission_class"),
+	numberOfOwners: integer("number_of_owners"),
+	serviceHistory: varchar("service_history"),
+	basicHistoryCheck: varchar("basic_history_check"),
+	motStatus: varchar("mot_status"),
+	motExpiry: date("mot_expiry"),
+	auctionCloses: timestamp("auction_closes", { withTimezone: true, mode: 'string' }),
+	specsAndFeatures: varchar("specs_and_features"),
+	taxStatus: varchar("tax_status"),
+	taxDueDate: date("tax_due_date"),
+	co2Emissions: integer("co2_emissions"),
+	markedForExport: boolean("marked_for_export"),
+	dateOfLastV5CIssued: date("date_of_last_v5c_issued"),
+	monthOfFirstRegistration: varchar("month_of_first_registration"),
+	typeApproval: varchar("type_approval"),
+	revenueWeight: integer("revenue_weight"),
+	aiSellPriceLow: integer("ai_sell_price_low"),
+	aiSellPriceHigh: integer("ai_sell_price_high"),
+	adsPrice: integer("ads_price"),
+	eBayUrl: varchar().notNull(),
+	facebookUrl: varchar().notNull(),
+});
+
 
 // SAVED SEARCHES
 export const savedSearches = aa.table("saved_searches", {
