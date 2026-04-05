@@ -1,0 +1,29 @@
+=== nvm / Node (WSL Ubuntu) ===
+nvm: present at ~/.nvm (install script ran; repo reported already installed / updated)
+nvm install 22 / nvm use 22: v22.22.2 is already installed / Now using node v22.22.2 (npm v10.9.7)
+node -v: v22.22.2
+npm -v: 10.9.7
+
+=== npm ci (directory: /Ice-AI/website) ===
+npm warn deprecated @esbuild-kit/esm-loader@2.6.5: Merged into tsx: https://tsx.is
+npm warn deprecated @esbuild-kit/core-utils@3.3.2: Merged into tsx: https://tsx.is
+npm warn deprecated boolean@3.2.0: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
+npm warn deprecated node-domexception@1.0.0: Use your platform's native DOMException instead
+
+> website@0.1.0 preinstall
+> node scripts/check-npm-cwd.cjs
+
+added 749 packages, and audited 750 packages in 2m
+
+265 packages are looking for funding
+  run `npm fund` for details
+
+8 moderate severity vulnerabilities
+
+To address all issues (including breaking changes), run:
+  npm audit fix --force
+
+Run `npm audit` for details.
+
+=== Result ===
+npm ci: SUCCESS (exit code 0; 749 packages added)

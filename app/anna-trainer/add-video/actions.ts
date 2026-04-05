@@ -8,7 +8,7 @@ import {withTempDir} from "@app/utils/tempfile";
 import * as fs from "fs/promises";
 import * as path from "path";
 import * as os from "os";
-import ffmpeg from "fluent-ffmpeg";
+import {runFfmpeg} from "@app/utils/ffmpegCli";
 import {languages, videos, videoStages} from "../../../drizzle/anna-trainer/schema";
 import {asc} from "drizzle-orm";
 import type {InferInsertModel} from "drizzle-orm";
@@ -660,28 +660,34 @@ export async function convertToMp4(
     outputPath: string,
 ): Promise<{success: boolean; error?: string}> {
     /**
-     * Converts a video file to MP4 format using fluent-ffmpeg.
+     * Converts a video file to MP4 format using ffmpeg (ffmpeg-static binary).
      * Works with local file paths.
      */
 
-    return new Promise((resolve) => {
-        ffmpeg(inputPath)
-            .videoCodec("libx264")
-            .audioCodec("aac")
-            .outputOptions(["-preset medium", "-crf 23", "-b:a 128k", "-movflags +faststart"])
-            .output(outputPath)
-            .on("end", () => {
-                resolve({success: true});
-            })
-            .on("error", (error: Error) => {
-                console.error("MP4 conversion failed:", error);
-                resolve({
-                    success: false,
-                    error: error.message || "MP4 conversion failed",
-                });
-            })
-            .run();
-    });
+    const result = await runFfmpeg([
+        "-i",
+        inputPath,
+        "-c:v",
+        "libx264",
+        "-c:a",
+        "aac",
+        "-preset",
+        "medium",
+        "-crf",
+        "23",
+        "-b:a",
+        "128k",
+        "-movflags",
+        "+faststart",
+        "-y",
+        outputPath,
+    ]);
+
+    if (!result.success) {
+        console.error("MP4 conversion failed:", result.error);
+    }
+
+    return result.success ? {success: true} : {success: false, error: result.error};
 }
 
 // CONVERT TO MP3
@@ -690,30 +696,31 @@ export async function convertToMp3(
     outputPath: string,
 ): Promise<{success: boolean; error?: string}> {
     /**
-     * Extracts audio from a video file as MP3 using fluent-ffmpeg.
+     * Extracts audio from a video file as MP3 using ffmpeg (ffmpeg-static binary).
      * Works with local file paths.
      */
 
-    return new Promise((resolve) => {
-        ffmpeg(inputPath)
-            .noVideo()
-            .audioCodec("libmp3lame")
-            .audioBitrate(192)
-            .audioFrequency(44100)
-            .audioChannels(2)
-            .output(outputPath)
-            .on("end", () => {
-                resolve({success: true});
-            })
-            .on("error", (error: Error) => {
-                console.error("MP3 extraction failed:", error);
-                resolve({
-                    success: false,
-                    error: error.message || "MP3 extraction failed",
-                });
-            })
-            .run();
-    });
+    const result = await runFfmpeg([
+        "-i",
+        inputPath,
+        "-vn",
+        "-c:a",
+        "libmp3lame",
+        "-b:a",
+        "192k",
+        "-ar",
+        "44100",
+        "-ac",
+        "2",
+        "-y",
+        outputPath,
+    ]);
+
+    if (!result.success) {
+        console.error("MP3 extraction failed:", result.error);
+    }
+
+    return result.success ? {success: true} : {success: false, error: result.error};
 }
 
 // TRANSCRIBE AUDIO
