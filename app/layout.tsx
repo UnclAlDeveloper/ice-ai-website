@@ -11,6 +11,7 @@ import { getAppNameFromHostname, AppFriendlyNames, AppIcons } from './utils/appN
 import { SessionProvider } from './lib/SessionProvider';
 import { getServerSessionFromCookies } from './lib/session';
 import AppBarServer from '@components/AppBarServer';
+import ClientEnvLogger from '@components/ClientEnvLogger';
 
 // GENERATE METADATA
 export async function generateMetadata(): Promise<Metadata> {
@@ -54,10 +55,16 @@ export default async function RootLayout({
         groups: session.user?.groups || [],
         expiresAt: session.expiresAt,
     } : null;
+
+    // next strips non-static process.env from the client bundle; pass public vars from the server
+    const publicEnvForClient = Object.fromEntries(
+        Object.entries(process.env).filter(([key]) => key.startsWith("NEXT_PUBLIC_")),
+    );
     
     return (
         <html lang="en" style={{ colorScheme: 'light' }}>
         <body>
+        <ClientEnvLogger publicEnv={publicEnvForClient} />
         <script
             dangerouslySetInnerHTML={{
                 __html: `
