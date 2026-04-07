@@ -176,6 +176,13 @@
       "when": 1773943548667,
       "tag": "0024_free_shinobi_shaw",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1774100000000,
+      "tag": "0025_resale_ebay_category",
+      "breakpoints": true
     }
   ]
 }

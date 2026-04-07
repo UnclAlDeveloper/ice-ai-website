@@ -121,16 +121,48 @@ async function fetchImageAsPart(
     }
 }
 
+// DESCRIPTION RESULT
+export interface DescriptionResult {
+    /** Structured output from the description generator containing both the prose description and a specs & features list. */
+
+    description: string;
+    specsAndFeatures: string | null;
+}
+
+// SPLIT DESCRIPTION RESPONSE
+function splitDescriptionResponse(raw: string): DescriptionResult {
+    /**
+     * Splits the Gemini response at the ---SPECS_AND_FEATURES--- delimiter
+     * into a description and a specs & features section. If the delimiter is
+     * absent the entire response is treated as the description.
+     */
+
+    const delimiter = "---SPECS_AND_FEATURES---";
+    const idx = raw.indexOf(delimiter);
+
+    if (idx === -1) {
+        return {description: raw.trim(), specsAndFeatures: null};
+    }
+
+    const description = raw.slice(0, idx).trim();
+    const specs = raw.slice(idx + delimiter.length).trim();
+    return {
+        description,
+        specsAndFeatures: specs && specs.toLowerCase() !== "none" ? specs : null,
+    };
+}
+
 // GENERATE DESCRIPTION
 export async function generateDescription(
     details: VehicleDetails,
     imageUrls: string[],
-): Promise<string | null> {
+): Promise<DescriptionResult | null> {
     /**
      * Calls the Gemini API with the vehicle details and any available images
-     * to generate a compelling listing description. The system prompt is read
-     * from create_description.md at call time. Returns the generated text, or
-     * null if the API call fails or returns an empty response.
+     * to generate a compelling listing description and a specs & features
+     * list. The system prompt is read from create_description.md at call
+     * time. Returns a DescriptionResult with both sections, or null if the
+     * API call fails or returns an empty response.
      */
 
     const apiKey = process.env.AUTO_ADS_GOOGLE_API_KEY;
@@ -151,7 +183,7 @@ export async function generateDescription(
 
     const userParts: object[] = [
         ...imageParts,
-        {text: `Here are the vehicle details:\n\n${detailsText}\n\nPlease write the listing description.`},
+        {text: `Here are the vehicle details:\n\n${detailsText}\n\nPlease write the listing description and specs & features.`},
     ];
 
     const ai = new GoogleGenAI({apiKey});
@@ -176,7 +208,9 @@ export async function generateDescription(
         const text = response.text?.trim() || "";
         console.log(`[DESCRIPTION] Gemini responded in ${duration}ms (${text.length} chars)`);
 
-        return text || null;
+        if (!text) return null;
+
+        return splitDescriptionResponse(text);
     } catch (err) {
         console.error("[DESCRIPTION] Gemini API error:", err instanceof Error ? err.message : String(err));
         return null;

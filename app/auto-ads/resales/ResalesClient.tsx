@@ -27,11 +27,13 @@ import ResaleListingEditor from "../components/ResaleListingEditor";
 interface ResalesClientProps {
     existingListings: {id: number; makeAndModel: string; shortDescription: string; registration: string | null}[];
     lookupMap: Record<string, string[]>;
+    ebayCategories: {code: string; value: string | null}[];
+    canUseAiSellPrice: boolean;
 }
-/** Props received from the server component: existing listing summaries and lookup values. */
+/** Props received from the server component: existing listing summaries, lookup values, eBay category options, and whether AI sell price is allowed for this user's tier. */
 
 // RESALES CLIENT
-export default function ResalesClient({existingListings, lookupMap}: ResalesClientProps) {
+export default function ResalesClient({existingListings, lookupMap, ebayCategories, canUseAiSellPrice}: ResalesClientProps) {
     /**
      * Client shell for the Resales page. Provides a dropdown to select and
      * edit existing resale listings, and a delete button to remove them.
@@ -155,7 +157,9 @@ export default function ResalesClient({existingListings, lookupMap}: ResalesClie
                 <ResaleListingEditor
                     data={editorData}
                     lookupMap={lookupMap}
+                    ebayCategories={ebayCategories}
                     onSaved={handleSaved}
+                    canUseAiSellPrice={canUseAiSellPrice}
                 />
             )}
 

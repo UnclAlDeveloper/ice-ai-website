@@ -146,6 +146,7 @@ export const resaleListings = aa.table("resale_listings", {
 	aiSellPriceLow: integer("ai_sell_price_low"),
 	aiSellPriceHigh: integer("ai_sell_price_high"),
 	adsPrice: integer("ads_price"),
+	ebayCategoryId: varchar("ebay_category_id"),
 	eBayUrl: varchar().notNull(),
 	facebookUrl: varchar().notNull(),
 });

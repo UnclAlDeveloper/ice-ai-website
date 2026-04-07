@@ -5,12 +5,15 @@ import {getAutoAdsDb} from "@app/lib/autoAdsDb";
 import {prospectListings, resaleListings, images} from "@/drizzle/auto-ads/schema";
 import {eq, and, asc} from "drizzle-orm";
 import {getServerSessionFromCookies} from "@app/lib/session";
+import {getUserTier, compareTiers} from "@app/lib/menuUtils";
 import {revalidatePath} from "next/cache";
 import {AWSAccess} from "@app/lib/AwsAccess";
 import {readNumberplateFromUrl, readNumberplateFromBuffer} from "@app/auto-ads/lib/numberplateReader";
 import {lookupVehicle} from "@app/auto-ads/lib/dvlaVehicleEnquiry";
 import {generateDescription, suggestSellingPrice} from "@app/auto-ads/lib/descriptionGenerator";
 import type {ResaleListingData} from "@app/auto-ads/resales/actions";
+import {getResaleListing, saveResaleListing} from "@app/auto-ads/resales/actions";
+import {createEbayListingSafe} from "@app/auto-ads/lib/ebayListing";
 
 // FETCH LISTING IMAGES
 export async function fetchListingImages(
@@ -307,6 +310,7 @@ export async function copyProspectToResale(prospectListingId: number): Promise<{
                 typeApproval: prospect.typeApproval,
                 revenueWeight: prospect.revenueWeight,
                 adsPrice: null,
+                ebayCategoryId: null,
                 eBayUrl: "",
                 facebookUrl: "",
             })
@@ -487,14 +491,79 @@ export async function detectNumberplateFromFile(formData: FormData): Promise<{
     }
 }
 
+// CREATE EBAY LISTING ACTION
+export async function createEbayListingAction(listingId: number): Promise<{
+    success: boolean;
+    ebayUrl?: string;
+    error?: string;
+}> {
+    /**
+     * Publishes or updates a resale listing on eBay via the Inventory API,
+     * then persists the returned item URL on the resale row. Requires
+     * AdvancedTier or higher and a saved listing with category, asking price,
+     * and at least one image.
+     */
+
+    const session = await getServerSessionFromCookies();
+    if (!session) {
+        return {success: false, error: "Not authenticated"};
+    }
+
+    const userTier = getUserTier(session.user.groups);
+    if (!compareTiers(userTier, "AdvancedTier")) {
+        return {success: false, error: "Advanced tier or higher required to publish on eBay"};
+    }
+
+    const loaded = await getResaleListing(listingId);
+    if (!loaded.success || !loaded.listing) {
+        return {success: false, error: loaded.error || "Listing not found"};
+    }
+
+    const listing = loaded.listing;
+
+    if (!listing.ebayCategoryId?.trim()) {
+        return {success: false, error: "Select an eBay category before publishing."};
+    }
+    if (listing.askingPrice == null || listing.askingPrice < 0) {
+        return {success: false, error: "Set an asking price before publishing on eBay."};
+    }
+
+    const imgResult = await fetchListingImages("Resale", listingId);
+    if (!imgResult.success || !imgResult.images?.length) {
+        return {success: false, error: "Add at least one image before publishing on eBay."};
+    }
+
+    const ebayResult = await createEbayListingSafe(listing, imgResult.images);
+    if (!ebayResult.success) {
+        const msg = ebayResult.error || "eBay request failed";
+        const hint =
+            /token|refresh|401|403/i.test(msg) && !/renew/i.test(msg)
+                ? " Check AUTO_ADS_EBAY_REFRESH_TOKEN and OAuth scopes if this persists."
+                : "";
+        return {success: false, error: msg + hint};
+    }
+
+    const toSave: ResaleListingData = {...listing, eBayUrl: ebayResult.ebayUrl};
+    const saved = await saveResaleListing(toSave);
+    if (!saved.success) {
+        return {
+            success: false,
+            error: saved.error || "Listing published on eBay but failed to save the URL locally.",
+        };
+    }
+
+    return {success: true, ebayUrl: ebayResult.ebayUrl};
+}
+
 // GENERATE RESALE DESCRIPTION
 export async function generateResaleDescription(
     formData: ResaleListingData,
-): Promise<{success: boolean; description?: string; error?: string}> {
+): Promise<{success: boolean; description?: string; specsAndFeatures?: string | null; error?: string}> {
     /**
      * Fetches all images for the resale listing (if it has been saved), then
      * calls the Gemini API with the vehicle details and those images to produce
-     * a compelling listing description. Returns the generated text or an error.
+     * a compelling listing description and a specs & features list. Returns
+     * both generated sections or an error.
      */
 
     const session = await getServerSessionFromCookies();
@@ -519,7 +588,7 @@ export async function generateResaleDescription(
             imageUrls = imageRows.map((r) => r.url);
         }
 
-        const description = await generateDescription(
+        const result = await generateDescription(
             {
                 makeAndModel: formData.makeAndModel,
                 shortDescription: formData.shortDescription,
@@ -547,11 +616,11 @@ export async function generateResaleDescription(
             imageUrls,
         );
 
-        if (!description) {
+        if (!result) {
             return {success: false, error: "Gemini returned an empty description"};
         }
 
-        return {success: true, description};
+        return {success: true, description: result.description, specsAndFeatures: result.specsAndFeatures};
     } catch (err) {
         console.error("Failed to generate resale description:", err);
         return {success: false, error: err instanceof Error ? err.message : String(err)};
@@ -567,11 +636,17 @@ export async function generateResaleSellPrice(
      * calls the Gemini API with the vehicle details and those images to produce
      * a suggested retail selling price range. Returns the low and high bounds
      * in GBP, or an error if the API call or response parsing fails.
+     * Requires AdvancedTier or higher (Admins included).
      */
 
     const session = await getServerSessionFromCookies();
     if (!session) {
         return {success: false, error: "Not authenticated"};
+    }
+
+    const userTier = getUserTier(session.user.groups);
+    if (!compareTiers(userTier, "AdvancedTier")) {
+        return {success: false, error: "Advanced tier or higher required for AI sell price"};
     }
 
     try {

@@ -1,6 +1,6 @@
 "use client";
 
-import React, {useState, useEffect, useRef} from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
     Box,
     TextField,
@@ -24,28 +24,28 @@ import DeleteIcon from "@mui/icons-material/Delete";
 import SearchIcon from "@mui/icons-material/Search";
 import AutoFixHighIcon from "@mui/icons-material/AutoFixHigh";
 import OpenInNewIcon from "@mui/icons-material/OpenInNew";
-import {saveResaleListing} from "../resales/actions";
-import type {ResaleListingData} from "../resales/actions";
-import {fetchListingImages, uploadListingImage, deleteListingImage, detectNumberplate, lookupRegistration, generateResaleDescription, generateResaleSellPrice} from "./actions";
-import type {DvlaVehicleData} from "./actions";
-import {deriveShortDescription} from "../lib/deriveShortDescription";
+import { saveResaleListing } from "../resales/actions";
+import type { ResaleListingData } from "../resales/actions";
+import { fetchListingImages, uploadListingImage, deleteListingImage, detectNumberplate, lookupRegistration, generateResaleDescription, generateResaleSellPrice, createEbayListingAction } from "./actions";
+import type { DvlaVehicleData } from "./actions";
+import { deriveShortDescription } from "../lib/deriveShortDescription";
 
 // STATUS OPTIONS
 const STATUS_OPTIONS = ["Bought", "Sold"] as const;
 /** Resale listing statuses matching the resale_listing_status database enum. */
 
 // AUTOCOMPLETE FIELD CONFIG
-const AUTOCOMPLETE_FIELDS: {key: keyof ResaleListingData; label: string; lookupType: string}[] = [
-    {key: "makeAndModel", label: "Make & Model", lookupType: "make_and_model"},
-    {key: "location", label: "Location", lookupType: "location"},
-    {key: "bodyType", label: "Body Type", lookupType: "body_type"},
-    {key: "cabType", label: "Cab Type", lookupType: "cab_type"},
-    {key: "fuelType", label: "Fuel Type", lookupType: "fuel_type"},
-    {key: "gearboxType", label: "Gearbox Type", lookupType: "gearbox_type"},
-    {key: "wheelbase", label: "Wheelbase", lookupType: "wheelbase"},
-    {key: "engineSize", label: "Engine Size", lookupType: "engine_size"},
-    {key: "colour", label: "Colour", lookupType: "colour"},
-    {key: "emissionClass", label: "Emission Class", lookupType: "emission_class"},
+const AUTOCOMPLETE_FIELDS: { key: keyof ResaleListingData; label: string; lookupType: string }[] = [
+    { key: "makeAndModel", label: "Make & Model", lookupType: "make_and_model" },
+    { key: "location", label: "Location", lookupType: "location" },
+    { key: "bodyType", label: "Body Type", lookupType: "body_type" },
+    { key: "cabType", label: "Cab Type", lookupType: "cab_type" },
+    { key: "fuelType", label: "Fuel Type", lookupType: "fuel_type" },
+    { key: "gearboxType", label: "Gearbox Type", lookupType: "gearbox_type" },
+    { key: "wheelbase", label: "Wheelbase", lookupType: "wheelbase" },
+    { key: "engineSize", label: "Engine Size", lookupType: "engine_size" },
+    { key: "colour", label: "Colour", lookupType: "colour" },
+    { key: "emissionClass", label: "Emission Class", lookupType: "emission_class" },
 ];
 /** Maps each autocomplete-enabled field to its display label and lookups table key. */
 
@@ -53,19 +53,31 @@ const AUTOCOMPLETE_FIELDS: {key: keyof ResaleListingData; label: string; lookupT
 interface ResaleListingEditorProps {
     data: ResaleListingData;
     lookupMap: Record<string, string[]>;
+    ebayCategories: { code: string; value: string | null }[];
     onSaved?: (data: ResaleListingData) => void;
     pendingPrimaryImage?: File | null;
     onPendingImageConsumed?: () => void;
+    canUseAiSellPrice: boolean;
 }
 /**
  * Props accepted by the editor: current listing data, lookup options, an
  * optional callback fired after a successful save, an optional pending
- * primary image file captured before the listing was created, and a callback
- * to clear that pending file once it has been uploaded to S3.
+ * primary image file captured before the listing was created, a callback
+ * to clear that pending file once it has been uploaded to S3, eBay category
+ * lookup options (code stored as ebayCategoryId, value shown in the UI), and whether
+ * the user may use AI suggested sell price (AdvancedTier or higher).
  */
 
 // RESALE LISTING EDITOR
-export default function ResaleListingEditor({data, lookupMap, onSaved, pendingPrimaryImage, onPendingImageConsumed}: ResaleListingEditorProps) {
+export default function ResaleListingEditor({
+    data,
+    lookupMap,
+    ebayCategories,
+    onSaved,
+    pendingPrimaryImage,
+    onPendingImageConsumed,
+    canUseAiSellPrice,
+}: ResaleListingEditorProps) {
     /**
      * Form for editing resale listing fields. Calls the saveResaleListing
      * server action directly so the record is always flushed and committed,
@@ -76,12 +88,12 @@ export default function ResaleListingEditor({data, lookupMap, onSaved, pendingPr
 
     const [formData, setFormData] = useState<ResaleListingData>(data);
     const [saving, setSaving] = useState(false);
-    const [snackbar, setSnackbar] = useState<{open: boolean; message: string; severity: "success" | "error"}>({
+    const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: "success" | "error" }>({
         open: false,
         message: "",
         severity: "success",
     });
-    const [imageList, setImageList] = useState<{id: number; url: string; isPrimary: boolean | null}[]>([]);
+    const [imageList, setImageList] = useState<{ id: number; url: string; isPrimary: boolean | null }[]>([]);
     const [uploading, setUploading] = useState(false);
     const [uploadingPrimary, setUploadingPrimary] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -122,6 +134,7 @@ export default function ResaleListingEditor({data, lookupMap, onSaved, pendingPr
     const [lookingUp, setLookingUp] = useState(false);
     const [generatingDescription, setGeneratingDescription] = useState(false);
     const [generatingPrice, setGeneratingPrice] = useState(false);
+    const [ebayCreating, setEbayCreating] = useState(false);
 
     // SET FIELD
     const setField = (key: keyof ResaleListingData, value: string | number | boolean | null) => {
@@ -129,7 +142,7 @@ export default function ResaleListingEditor({data, lookupMap, onSaved, pendingPr
          * Updates a single field in the local form state.
          */
 
-        setFormData((prev) => ({...prev, [key]: value}));
+        setFormData((prev) => ({ ...prev, [key]: value }));
     };
 
     // APPLY DVLA DATA
@@ -144,7 +157,7 @@ export default function ResaleListingEditor({data, lookupMap, onSaved, pendingPr
 
         let filled = 0;
         setFormData((prev) => {
-            const next = {...prev};
+            const next = { ...prev };
             const keys = Object.keys(dvla) as (keyof DvlaVehicleData)[];
             for (const key of keys) {
                 const dvlaValue = dvla[key];
@@ -181,12 +194,12 @@ export default function ResaleListingEditor({data, lookupMap, onSaved, pendingPr
             const result = await lookupRegistration(formData.registration);
             if (result.success && result.data) {
                 const filled = applyDvlaData(result.data);
-                setSnackbar({open: true, message: `DVLA lookup complete — ${filled} field${filled !== 1 ? "s" : ""} populated`, severity: "success"});
+                setSnackbar({ open: true, message: `DVLA lookup complete — ${filled} field${filled !== 1 ? "s" : ""} populated`, severity: "success" });
             } else {
-                setSnackbar({open: true, message: result.error || "DVLA lookup failed", severity: "error"});
+                setSnackbar({ open: true, message: result.error || "DVLA lookup failed", severity: "error" });
             }
         } catch (err) {
-            setSnackbar({open: true, message: err instanceof Error ? err.message : "DVLA lookup failed", severity: "error"});
+            setSnackbar({ open: true, message: err instanceof Error ? err.message : "DVLA lookup failed", severity: "error" });
         } finally {
             setLookingUp(false);
         }
@@ -196,21 +209,25 @@ export default function ResaleListingEditor({data, lookupMap, onSaved, pendingPr
     const handleGenerateDescription = async () => {
         /**
          * Calls the Gemini API via the server action, passing the current form
-         * data and any uploaded images, then populates the Full Description
-         * field with the returned text.
+         * data and any uploaded images, then populates both the Full Description
+         * and Specs & Features fields with the returned sections.
          */
 
         setGeneratingDescription(true);
         try {
             const result = await generateResaleDescription(formData);
             if (result.success && result.description) {
-                setField("fullDescription", result.description);
-                setSnackbar({open: true, message: "Description generated successfully", severity: "success"});
+                setFormData((prev) => ({
+                    ...prev,
+                    fullDescription: result.description!,
+                    specsAndFeatures: result.specsAndFeatures ?? prev.specsAndFeatures,
+                }));
+                setSnackbar({ open: true, message: "Description and specs generated successfully", severity: "success" });
             } else {
-                setSnackbar({open: true, message: result.error || "Failed to generate description", severity: "error"});
+                setSnackbar({ open: true, message: result.error || "Failed to generate description", severity: "error" });
             }
         } catch (err) {
-            setSnackbar({open: true, message: err instanceof Error ? err.message : "Unexpected error", severity: "error"});
+            setSnackbar({ open: true, message: err instanceof Error ? err.message : "Unexpected error", severity: "error" });
         } finally {
             setGeneratingDescription(false);
         }
@@ -228,17 +245,17 @@ export default function ResaleListingEditor({data, lookupMap, onSaved, pendingPr
         try {
             const result = await generateResaleSellPrice(formData);
             if (result.success && result.low !== undefined && result.high !== undefined) {
-                setFormData((prev) => ({...prev, aiSellPriceLow: result.low!, aiSellPriceHigh: result.high!}));
+                setFormData((prev) => ({ ...prev, aiSellPriceLow: result.low!, aiSellPriceHigh: result.high! }));
                 setSnackbar({
                     open: true,
                     message: `AI suggested sell price: £${result.low.toLocaleString()} – £${result.high.toLocaleString()}`,
                     severity: "success",
                 });
             } else {
-                setSnackbar({open: true, message: result.error || "Failed to generate sell price", severity: "error"});
+                setSnackbar({ open: true, message: result.error || "Failed to generate sell price", severity: "error" });
             }
         } catch (err) {
-            setSnackbar({open: true, message: err instanceof Error ? err.message : "Unexpected error", severity: "error"});
+            setSnackbar({ open: true, message: err instanceof Error ? err.message : "Unexpected error", severity: "error" });
         } finally {
             setGeneratingPrice(false);
         }
@@ -271,15 +288,15 @@ export default function ResaleListingEditor({data, lookupMap, onSaved, pendingPr
                     onPendingImageConsumed?.();
                 }
 
-                const persisted = {...formData, id: result.id};
+                const persisted = { ...formData, id: result.id };
                 setFormData(persisted);
-                setSnackbar({open: true, message: "Listing saved successfully", severity: "success"});
+                setSnackbar({ open: true, message: "Listing saved successfully", severity: "success" });
                 onSaved?.(persisted);
             } else {
-                setSnackbar({open: true, message: result.error || "Failed to save listing", severity: "error"});
+                setSnackbar({ open: true, message: result.error || "Failed to save listing", severity: "error" });
             }
         } catch (err) {
-            setSnackbar({open: true, message: err instanceof Error ? err.message : "Unexpected error", severity: "error"});
+            setSnackbar({ open: true, message: err instanceof Error ? err.message : "Unexpected error", severity: "error" });
         } finally {
             setSaving(false);
         }
@@ -308,11 +325,11 @@ export default function ResaleListingEditor({data, lookupMap, onSaved, pendingPr
                 if (result.success && result.image) {
                     setImageList((prev) => [...prev, result.image!]);
                 } else {
-                    setSnackbar({open: true, message: result.error || "Failed to upload image", severity: "error"});
+                    setSnackbar({ open: true, message: result.error || "Failed to upload image", severity: "error" });
                 }
             }
         } catch (err) {
-            setSnackbar({open: true, message: err instanceof Error ? err.message : "Upload failed", severity: "error"});
+            setSnackbar({ open: true, message: err instanceof Error ? err.message : "Upload failed", severity: "error" });
         } finally {
             setUploading(false);
             if (fileInputRef.current) fileInputRef.current.value = "";
@@ -350,23 +367,55 @@ export default function ResaleListingEditor({data, lookupMap, onSaved, pendingPr
                             const dvlaResult = await lookupRegistration(plateResult.numberplate);
                             if (dvlaResult.success && dvlaResult.data) {
                                 const filled = applyDvlaData(dvlaResult.data);
-                                setSnackbar({open: true, message: `Plate ${plateResult.numberplate} detected — ${filled} field${filled !== 1 ? "s" : ""} populated via DVLA`, severity: "success"});
+                                setSnackbar({ open: true, message: `Plate ${plateResult.numberplate} detected — ${filled} field${filled !== 1 ? "s" : ""} populated via DVLA`, severity: "success" });
                             } else {
-                                setSnackbar({open: true, message: `Numberplate detected: ${plateResult.numberplate}`, severity: "success"});
+                                setSnackbar({ open: true, message: `Numberplate detected: ${plateResult.numberplate}`, severity: "success" });
                             }
                         }
                     });
                 }
             } else {
-                setSnackbar({open: true, message: result.error || "Failed to upload primary image", severity: "error"});
+                setSnackbar({ open: true, message: result.error || "Failed to upload primary image", severity: "error" });
             }
         } catch (err) {
-            setSnackbar({open: true, message: err instanceof Error ? err.message : "Upload failed", severity: "error"});
+            setSnackbar({ open: true, message: err instanceof Error ? err.message : "Upload failed", severity: "error" });
         } finally {
             setUploadingPrimary(false);
             if (primaryFileInputRef.current) primaryFileInputRef.current.value = "";
         }
     };
+
+    // HANDLE EBAY PUBLISH
+    const handleEbayPublish = async () => {
+        /**
+         * Publishes or updates the resale listing on eBay and stores the returned URL.
+         */
+
+        if (!formData.id || !canUseAiSellPrice) return;
+        setEbayCreating(true);
+        try {
+            const result = await createEbayListingAction(formData.id);
+            if (result.success && result.ebayUrl) {
+                setFormData((prev) => ({ ...prev, eBayUrl: result.ebayUrl! }));
+                setSnackbar({ open: true, message: "eBay listing published successfully", severity: "success" });
+            } else {
+                setSnackbar({ open: true, message: result.error || "eBay publish failed", severity: "error" });
+            }
+        } catch (err) {
+            setSnackbar({ open: true, message: err instanceof Error ? err.message : "eBay publish failed", severity: "error" });
+        } finally {
+            setEbayCreating(false);
+        }
+    };
+
+    const ebayPublishDisabled =
+        !formData.id ||
+        !canUseAiSellPrice ||
+        !formData.ebayCategoryId?.trim() ||
+        formData.askingPrice == null ||
+        formData.askingPrice < 0 ||
+        imageList.length === 0 ||
+        ebayCreating;
 
     // HANDLE DELETE IMAGE
     const handleDeleteImage = async (imageId: number) => {
@@ -379,25 +428,25 @@ export default function ResaleListingEditor({data, lookupMap, onSaved, pendingPr
         if (result.success) {
             setImageList((prev) => prev.filter((img) => img.id !== imageId));
         } else {
-            setSnackbar({open: true, message: result.error || "Failed to delete image", severity: "error"});
+            setSnackbar({ open: true, message: result.error || "Failed to delete image", severity: "error" });
         }
     };
 
     // column spans: xs=12 (full), sm=6 (half), md=4 (third)
-    const fieldSize = {xs: 12, sm: 6, md: 4};
-    const wideFieldSize = {xs: 12};
+    const fieldSize = { xs: 12, sm: 6, md: 4 };
+    const wideFieldSize = { xs: 12 };
 
     return (
         <Box component="form" onSubmit={handleSubmit} noValidate>
             {/* --- primary image (floated so content wraps around it) --- */}
             {formData.id ? (
-                <Box sx={{float: {sm: "left"}, mr: {sm: 3}, mb: 2, textAlign: {xs: "center", sm: "left"}}}>
+                <Box sx={{ float: { sm: "left" }, mr: { sm: 3 }, mb: 2, textAlign: { xs: "center", sm: "left" } }}>
                     {primaryImage ? (
                         <Box
                             sx={{
                                 position: "relative",
                                 maxWidth: 320,
-                                mx: {xs: "auto", sm: 0},
+                                mx: { xs: "auto", sm: 0 },
                                 borderRadius: 1,
                                 overflow: "hidden",
                                 border: "1px solid",
@@ -408,7 +457,7 @@ export default function ResaleListingEditor({data, lookupMap, onSaved, pendingPr
                                 component="img"
                                 src={primaryImage.url}
                                 alt="Primary"
-                                sx={{maxWidth: 320, width: "100%", height: "auto", display: "block"}}
+                                sx={{ maxWidth: 320, width: "100%", height: "auto", display: "block" }}
                             />
                             <IconButton
                                 size="small"
@@ -419,7 +468,7 @@ export default function ResaleListingEditor({data, lookupMap, onSaved, pendingPr
                                     right: 2,
                                     bgcolor: "rgba(0,0,0,0.5)",
                                     color: "white",
-                                    "&:hover": {bgcolor: "rgba(0,0,0,0.7)"},
+                                    "&:hover": { bgcolor: "rgba(0,0,0,0.7)" },
                                 }}
                             >
                                 <DeleteIcon fontSize="small" />
@@ -431,7 +480,7 @@ export default function ResaleListingEditor({data, lookupMap, onSaved, pendingPr
                             sx={{
                                 width: 120,
                                 height: 120,
-                                mx: {xs: "auto", sm: 0},
+                                mx: { xs: "auto", sm: 0 },
                                 borderRadius: 1,
                                 border: "2px dashed",
                                 borderColor: "divider",
@@ -439,10 +488,10 @@ export default function ResaleListingEditor({data, lookupMap, onSaved, pendingPr
                                 alignItems: "center",
                                 justifyContent: "center",
                                 cursor: uploadingPrimary ? "default" : "pointer",
-                                "&:hover": uploadingPrimary ? {} : {borderColor: "primary.main", bgcolor: "action.hover"},
+                                "&:hover": uploadingPrimary ? {} : { borderColor: "primary.main", bgcolor: "action.hover" },
                             }}
                         >
-                            {uploadingPrimary ? <CircularProgress size={24} /> : <PhotoIcon color="action" sx={{fontSize: 36}} />}
+                            {uploadingPrimary ? <CircularProgress size={24} /> : <PhotoIcon color="action" sx={{ fontSize: 36 }} />}
                         </Box>
                     )}
                     <input
@@ -455,11 +504,11 @@ export default function ResaleListingEditor({data, lookupMap, onSaved, pendingPr
                     />
                 </Box>
             ) : pendingPreviewUrl ? (
-                <Box sx={{float: {sm: "left"}, mr: {sm: 3}, mb: 2, textAlign: {xs: "center", sm: "left"}}}>
+                <Box sx={{ float: { sm: "left" }, mr: { sm: 3 }, mb: 2, textAlign: { xs: "center", sm: "left" } }}>
                     <Box
                         sx={{
                             maxWidth: 320,
-                            mx: {xs: "auto", sm: 0},
+                            mx: { xs: "auto", sm: 0 },
                             borderRadius: 1,
                             overflow: "hidden",
                             border: "1px solid",
@@ -470,23 +519,23 @@ export default function ResaleListingEditor({data, lookupMap, onSaved, pendingPr
                             component="img"
                             src={pendingPreviewUrl}
                             alt="Primary (pending upload)"
-                            sx={{maxWidth: 320, width: "100%", height: "auto", display: "block"}}
+                            sx={{ maxWidth: 320, width: "100%", height: "auto", display: "block" }}
                         />
                     </Box>
                 </Box>
             ) : (
-                <Typography variant="body2" color="text.secondary" sx={{mb: 2}}>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
                     Save the listing first to add a primary image.
                 </Typography>
             )}
 
             {/* --- vehicle identity --- */}
-            <Typography variant="subtitle2" color="text.secondary" sx={{mb: 1}}>
+            <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
                 Vehicle Identity
             </Typography>
             <Grid container spacing={2}>
                 <Grid size={fieldSize}>
-                    <Box sx={{display: "flex", gap: 1}}>
+                    <Box sx={{ display: "flex", gap: 1 }}>
                         <TextField
                             label="Registration"
                             size="small"
@@ -499,7 +548,7 @@ export default function ResaleListingEditor({data, lookupMap, onSaved, pendingPr
                             size="small"
                             disabled={!formData.registration || lookingUp}
                             onClick={handleDvlaLookup}
-                            sx={{minWidth: 0, px: 1.5, whiteSpace: "nowrap"}}
+                            sx={{ minWidth: 0, px: 1.5, whiteSpace: "nowrap" }}
                             startIcon={lookingUp ? <CircularProgress size={16} /> : <SearchIcon />}
                         >
                             DVLA
@@ -559,7 +608,7 @@ export default function ResaleListingEditor({data, lookupMap, onSaved, pendingPr
 
 
             {/* --- vehicle details --- */}
-            <Typography variant="subtitle2" color="text.secondary" sx={{mt: 3, mb: 1}}>
+            <Typography variant="subtitle2" color="text.secondary" sx={{ mt: 3, mb: 1 }}>
                 Vehicle Details
             </Typography>
             <Grid container spacing={2}>
@@ -604,7 +653,7 @@ export default function ResaleListingEditor({data, lookupMap, onSaved, pendingPr
 
 
             {/* --- mileage --- */}
-            <Typography variant="subtitle2" color="text.secondary" sx={{mt: 3, mb: 1}}>
+            <Typography variant="subtitle2" color="text.secondary" sx={{ mt: 3, mb: 1 }}>
                 Mileage
             </Typography>
             <Grid container spacing={2}>
@@ -632,7 +681,7 @@ export default function ResaleListingEditor({data, lookupMap, onSaved, pendingPr
 
 
             {/* --- history and condition --- */}
-            <Typography variant="subtitle2" color="text.secondary" sx={{mt: 3, mb: 1}}>
+            <Typography variant="subtitle2" color="text.secondary" sx={{ mt: 3, mb: 1 }}>
                 History &amp; Condition
             </Typography>
             <Grid container spacing={2}>
@@ -685,14 +734,14 @@ export default function ResaleListingEditor({data, lookupMap, onSaved, pendingPr
                         type="date"
                         value={formData.motExpiry ?? ""}
                         onChange={(e) => setField("motExpiry", e.target.value || null)}
-                        slotProps={{inputLabel: {shrink: true}}}
+                        slotProps={{ inputLabel: { shrink: true } }}
                     />
                 </Grid>
             </Grid>
 
 
             {/* --- tax and emissions --- */}
-            <Typography variant="subtitle2" color="text.secondary" sx={{mt: 3, mb: 1}}>
+            <Typography variant="subtitle2" color="text.secondary" sx={{ mt: 3, mb: 1 }}>
                 Tax &amp; Emissions
             </Typography>
             <Grid container spacing={2}>
@@ -714,7 +763,7 @@ export default function ResaleListingEditor({data, lookupMap, onSaved, pendingPr
                         type="date"
                         value={formData.taxDueDate ?? ""}
                         onChange={(e) => setField("taxDueDate", e.target.value || null)}
-                        slotProps={{inputLabel: {shrink: true}}}
+                        slotProps={{ inputLabel: { shrink: true } }}
                     />
                 </Grid>
 
@@ -769,7 +818,7 @@ export default function ResaleListingEditor({data, lookupMap, onSaved, pendingPr
                         type="date"
                         value={formData.dateOfLastV5CIssued ?? ""}
                         onChange={(e) => setField("dateOfLastV5CIssued", e.target.value || null)}
-                        slotProps={{inputLabel: {shrink: true}}}
+                        slotProps={{ inputLabel: { shrink: true } }}
                     />
                 </Grid>
 
@@ -795,7 +844,7 @@ export default function ResaleListingEditor({data, lookupMap, onSaved, pendingPr
 
 
             {/* --- descriptions --- */}
-            <Box sx={{mt: 3, mb: 1, display: "flex", alignItems: "center", gap: 1}}>
+            <Box sx={{ mt: 3, mb: 1, display: "flex", alignItems: "center", gap: 1 }}>
                 <Typography variant="subtitle2" color="text.secondary">
                     Descriptions
                 </Typography>
@@ -805,7 +854,7 @@ export default function ResaleListingEditor({data, lookupMap, onSaved, pendingPr
                     disabled={generatingDescription || !formData.makeAndModel}
                     onClick={handleGenerateDescription}
                     startIcon={generatingDescription ? <CircularProgress size={14} /> : <AutoFixHighIcon />}
-                    sx={{ml: "auto"}}
+                    sx={{ ml: "auto" }}
                 >
                     {generatingDescription ? "Generating…" : "AI Generate"}
                 </Button>
@@ -838,20 +887,22 @@ export default function ResaleListingEditor({data, lookupMap, onSaved, pendingPr
 
 
             {/* --- pricing --- */}
-            <Box sx={{mt: 3, mb: 1, display: "flex", alignItems: "center", gap: 1}}>
+            <Box sx={{ mt: 3, mb: 1, display: "flex", alignItems: "center", gap: 1 }}>
                 <Typography variant="subtitle2" color="text.secondary">
                     Pricing
                 </Typography>
-                <Button
-                    size="small"
-                    variant="outlined"
-                    disabled={generatingPrice || !formData.makeAndModel}
-                    onClick={handleGenerateSellPrice}
-                    startIcon={generatingPrice ? <CircularProgress size={14} /> : <AutoFixHighIcon />}
-                    sx={{ml: "auto"}}
-                >
-                    {generatingPrice ? "Generating…" : "AI Price"}
-                </Button>
+                {canUseAiSellPrice && (
+                    <Button
+                        size="small"
+                        variant="outlined"
+                        disabled={generatingPrice || !formData.makeAndModel}
+                        onClick={handleGenerateSellPrice}
+                        startIcon={generatingPrice ? <CircularProgress size={14} /> : <AutoFixHighIcon />}
+                        sx={{ ml: "auto" }}
+                    >
+                        {generatingPrice ? "Generating…" : "AI Price"}
+                    </Button>
+                )}
             </Box>
             <Grid container spacing={2}>
                 <Grid size={fieldSize}>
@@ -865,7 +916,9 @@ export default function ResaleListingEditor({data, lookupMap, onSaved, pendingPr
                     />
                 </Grid>
 
-                {formData.aiSellPriceLow !== null && formData.aiSellPriceHigh !== null && (
+                {canUseAiSellPrice &&
+                    formData.aiSellPriceLow !== null &&
+                    formData.aiSellPriceHigh !== null && (
                     <Grid size={wideFieldSize}>
                         <Typography variant="body2" color="text.primary">
                             <strong>AI Suggested Sell Price:</strong>{" "}
@@ -888,12 +941,33 @@ export default function ResaleListingEditor({data, lookupMap, onSaved, pendingPr
             </Grid>
 
             {/* --- listings --- */}
-            <Typography variant="subtitle2" color="text.secondary" sx={{mt: 3, mb: 1}}>
+            <Typography variant="subtitle2" color="text.secondary" sx={{ mt: 3, mb: 1 }}>
                 Listings
             </Typography>
-            <Box sx={{display: "flex", flexDirection: "column", gap: 1}}>
-                <Box sx={{display: "flex", alignItems: "center", gap: 1}}>
-                    <Typography variant="body2" sx={{minWidth: 70}}>eBay</Typography>
+            <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+                    <Typography variant="body2" sx={{ minWidth: 70 }}>eBay</Typography>
+                    <FormControl size="small" sx={{ minWidth: 200, maxWidth: 420, flex: "1 1 200px" }}>
+                        <InputLabel id="resale-ebay-category-label">eBay category</InputLabel>
+                        <Select
+                            labelId="resale-ebay-category-label"
+                            label="eBay category"
+                            value={formData.ebayCategoryId ?? ""}
+                            onChange={(e) => {
+                                const v = e.target.value;
+                                setField("ebayCategoryId", v === "" ? null : String(v));
+                            }}
+                        >
+                            <MenuItem value="">
+                                <em>None</em>
+                            </MenuItem>
+                            {ebayCategories.map((row) => (
+                                <MenuItem key={row.code} value={row.code}>
+                                    {row.value ?? row.code}
+                                </MenuItem>
+                            ))}
+                        </Select>
+                    </FormControl>
                     {formData.eBayUrl && (
                         <Typography
                             component="a"
@@ -901,18 +975,24 @@ export default function ResaleListingEditor({data, lookupMap, onSaved, pendingPr
                             target="_blank"
                             rel="noopener noreferrer"
                             variant="body2"
-                            sx={{display: "flex", alignItems: "center", gap: 0.5, mr: 1}}
+                            sx={{ display: "flex", alignItems: "center", gap: 0.5, mr: 1 }}
                         >
-                            View listing <OpenInNewIcon sx={{fontSize: 14}} />
+                            View listing <OpenInNewIcon sx={{ fontSize: 14 }} />
                         </Typography>
                     )}
-                    <Button size="small" variant="outlined">
-                        {formData.eBayUrl ? "Update" : "Create"}
+                    <Button
+                        size="small"
+                        variant="outlined"
+                        disabled={ebayPublishDisabled}
+                        onClick={handleEbayPublish}
+                        startIcon={ebayCreating ? <CircularProgress size={14} /> : undefined}
+                    >
+                        {ebayCreating ? "Working…" : formData.eBayUrl ? "Update" : "Create"}
                     </Button>
                 </Box>
 
-                <Box sx={{display: "flex", alignItems: "center", gap: 1}}>
-                    <Typography variant="body2" sx={{minWidth: 70}}>Facebook</Typography>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                    <Typography variant="body2" sx={{ minWidth: 70 }}>Facebook</Typography>
                     {formData.facebookUrl && (
                         <Typography
                             component="a"
@@ -920,9 +1000,9 @@ export default function ResaleListingEditor({data, lookupMap, onSaved, pendingPr
                             target="_blank"
                             rel="noopener noreferrer"
                             variant="body2"
-                            sx={{display: "flex", alignItems: "center", gap: 0.5, mr: 1}}
+                            sx={{ display: "flex", alignItems: "center", gap: 0.5, mr: 1 }}
                         >
-                            View listing <OpenInNewIcon sx={{fontSize: 14}} />
+                            View listing <OpenInNewIcon sx={{ fontSize: 14 }} />
                         </Typography>
                     )}
                     <Button size="small" variant="outlined">
@@ -932,7 +1012,7 @@ export default function ResaleListingEditor({data, lookupMap, onSaved, pendingPr
             </Box>
 
             {/* --- save --- */}
-            <Box sx={{mt: 3, display: "flex", justifyContent: "flex-end"}}>
+            <Box sx={{ mt: 3, display: "flex", justifyContent: "flex-end" }}>
                 <Button
                     type="submit"
                     variant="contained"
@@ -944,11 +1024,11 @@ export default function ResaleListingEditor({data, lookupMap, onSaved, pendingPr
             </Box>
 
             {/* --- images --- */}
-            <Typography variant="subtitle2" color="text.secondary" sx={{mt: 3, mb: 1}}>
+            <Typography variant="subtitle2" color="text.secondary" sx={{ mt: 3, mb: 1 }}>
                 Images
             </Typography>
             {formData.id ? (
-                <Box sx={{display: "flex", flexWrap: "wrap", gap: 2, alignItems: "flex-start"}}>
+                <Box sx={{ display: "flex", flexWrap: "wrap", gap: 2, alignItems: "flex-start" }}>
                     {secondaryImages.map((img) => (
                         <Box
                             key={img.id}
@@ -965,7 +1045,7 @@ export default function ResaleListingEditor({data, lookupMap, onSaved, pendingPr
                                 component="img"
                                 src={img.url}
                                 alt=""
-                                sx={{maxWidth: 320, width: "100%", height: "auto", display: "block"}}
+                                sx={{ maxWidth: 320, width: "100%", height: "auto", display: "block" }}
                             />
                             <IconButton
                                 size="small"
@@ -976,7 +1056,7 @@ export default function ResaleListingEditor({data, lookupMap, onSaved, pendingPr
                                     right: 2,
                                     bgcolor: "rgba(0,0,0,0.5)",
                                     color: "white",
-                                    "&:hover": {bgcolor: "rgba(0,0,0,0.7)"},
+                                    "&:hover": { bgcolor: "rgba(0,0,0,0.7)" },
                                 }}
                             >
                                 <DeleteIcon fontSize="small" />
@@ -996,10 +1076,10 @@ export default function ResaleListingEditor({data, lookupMap, onSaved, pendingPr
                             alignItems: "center",
                             justifyContent: "center",
                             cursor: uploading ? "default" : "pointer",
-                            "&:hover": uploading ? {} : {borderColor: "primary.main", bgcolor: "action.hover"},
+                            "&:hover": uploading ? {} : { borderColor: "primary.main", bgcolor: "action.hover" },
                         }}
                     >
-                        {uploading ? <CircularProgress size={24} /> : <AddPhotoAlternateIcon color="action" sx={{fontSize: 36}} />}
+                        {uploading ? <CircularProgress size={24} /> : <AddPhotoAlternateIcon color="action" sx={{ fontSize: 36 }} />}
                     </Box>
 
                     <input
@@ -1020,11 +1100,11 @@ export default function ResaleListingEditor({data, lookupMap, onSaved, pendingPr
             <Snackbar
                 open={snackbar.open}
                 autoHideDuration={4000}
-                onClose={() => setSnackbar((prev) => ({...prev, open: false}))}
-                anchorOrigin={{vertical: "bottom", horizontal: "center"}}
+                onClose={() => setSnackbar((prev) => ({ ...prev, open: false }))}
+                anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
             >
                 <Alert
-                    onClose={() => setSnackbar((prev) => ({...prev, open: false}))}
+                    onClose={() => setSnackbar((prev) => ({ ...prev, open: false }))}
                     severity={snackbar.severity}
                     variant="filled"
                 >

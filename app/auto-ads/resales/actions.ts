@@ -48,6 +48,7 @@ export type ResaleListingData = {
     aiSellPriceLow: number | null;
     aiSellPriceHigh: number | null;
     adsPrice: number | null;
+    ebayCategoryId: string | null;
     eBayUrl: string;
     facebookUrl: string;
 };
@@ -55,7 +56,7 @@ export type ResaleListingData = {
  * Shape of resale listing data sent from and returned to the editor form.
  * Includes an optional `id` to distinguish inserts from updates. Compared to
  * prospect listings, the status enum is narrower ('Bought' | 'Sold') and the
- * resale-specific fields eBayUrl, facebookUrl, and adsPrice are present.
+ * resale-specific fields ebayCategoryId, eBayUrl, facebookUrl, and adsPrice are present.
  */
 
 // GET RESALE LISTINGS
@@ -152,6 +153,7 @@ export async function getResaleListing(id: number): Promise<{
                 aiSellPriceLow: resaleListings.aiSellPriceLow,
                 aiSellPriceHigh: resaleListings.aiSellPriceHigh,
                 adsPrice: resaleListings.adsPrice,
+                ebayCategoryId: resaleListings.ebayCategoryId,
                 eBayUrl: resaleListings.eBayUrl,
                 facebookUrl: resaleListings.facebookUrl,
             })
@@ -232,6 +234,7 @@ export async function saveResaleListing(data: ResaleListingData): Promise<{
                     aiSellPriceLow: data.aiSellPriceLow,
                     aiSellPriceHigh: data.aiSellPriceHigh,
                     adsPrice: data.adsPrice,
+                    ebayCategoryId: data.ebayCategoryId,
                     eBayUrl: data.eBayUrl,
                     facebookUrl: data.facebookUrl,
                     updatedAt: now,
@@ -287,6 +290,7 @@ export async function saveResaleListing(data: ResaleListingData): Promise<{
                 aiSellPriceLow: data.aiSellPriceLow,
                 aiSellPriceHigh: data.aiSellPriceHigh,
                 adsPrice: data.adsPrice,
+                ebayCategoryId: data.ebayCategoryId,
                 eBayUrl: data.eBayUrl,
                 facebookUrl: data.facebookUrl,
             })
