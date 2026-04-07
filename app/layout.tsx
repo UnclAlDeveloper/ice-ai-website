@@ -58,7 +58,9 @@ export default async function RootLayout({
 
     // next strips non-static process.env from the client bundle; pass public vars from the server
     const publicEnvForClient = Object.fromEntries(
-        Object.entries(process.env).filter(([key]) => key.startsWith("NEXT_PUBLIC_")),
+        Object.entries(process.env)
+            .filter(([key]) => key.startsWith("NEXT_PUBLIC_"))
+            .sort(([a], [b]) => a.localeCompare(b)),
     );
     
     return (
