@@ -543,7 +543,11 @@ export async function createEbayListingAction(listingId: number): Promise<{
         return {success: false, error: msg + hint};
     }
 
-    const toSave: ResaleListingData = {...listing, eBayUrl: ebayResult.ebayUrl};
+    const toSave: ResaleListingData = {
+        ...listing,
+        eBayUrl: ebayResult.ebayUrl,
+        ebayItemId: ebayResult.ebayItemId ?? listing.ebayItemId,
+    };
     const saved = await saveResaleListing(toSave);
     if (!saved.success) {
         return {

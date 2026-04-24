@@ -1,6 +1,11 @@
 import eBayApi from "ebay-api";
 import type {ResaleListingData} from "@app/auto-ads/resales/actions";
 import {getEbayApiClient} from "@app/auto-ads/lib/ebayClient";
+import {
+    createOrReviseClassifiedAd,
+    formatTradingError,
+    isVehicleCategory,
+} from "@app/auto-ads/lib/ebayTrading";
 
 // LISTING IMAGE ROW
 export type ListingImageRow = {id: number; url: string; isPrimary: boolean | null};
@@ -289,21 +294,27 @@ function formatEbayError(err: unknown): string {
     return String(err);
 }
 
-// CREATE EBAY LISTING
-export async function createEbayListing(
+// EBAY LISTING RESULT
+export type EbayListingResult = {ebayUrl: string; ebayItemId: string | null};
+/**
+ * Return shape from createEbayListing. ebayItemId is populated for the Trading
+ * path (UK vehicle Classified Ads) and left null for the Inventory path, which
+ * only exposes a marketplace listingId via the offer response.
+ */
+
+
+// CREATE EBAY LISTING INVENTORY
+async function createEbayListingInventory(
     listing: ResaleListingData,
     images: ListingImageRow[],
-): Promise<string> {
+): Promise<EbayListingResult> {
     /**
-     * Creates or updates the inventory item, then creates or updates an offer and
-     * publishes it, returning the public eBay item URL.
+     * Publishes a non-vehicle resale via the REST Sell Inventory API. Creates
+     * or replaces the inventory item, creates or updates the offer, then
+     * publishes it and returns the public listing URL.
      */
 
-    if (!listing.id) {
-        throw new Error("Listing must be saved before publishing to eBay.");
-    }
-
-    const sku = resaleListingSku(listing.id);
+    const sku = resaleListingSku(listing.id!);
     const ebay = await getEbayApiClient();
     const marketplaceId =
         process.env.AUTO_ADS_EBAY_MARKETPLACE_ID?.trim() || eBayApi.MarketplaceId.EBAY_GB;
@@ -333,7 +344,10 @@ export async function createEbayListing(
             if (!listingId) {
                 throw new Error("eBay publish succeeded but no listing id was returned.");
             }
-            return listingUrlForMarketplace(marketplaceId, listingId);
+            return {
+                ebayUrl: listingUrlForMarketplace(marketplaceId, listingId),
+                ebayItemId: null,
+            };
         }
 
         let listingId = existing.listing?.listingId;
@@ -344,7 +358,10 @@ export async function createEbayListing(
         if (!listingId) {
             throw new Error("Could not resolve eBay listing id after update.");
         }
-        return listingUrlForMarketplace(marketplaceId, listingId);
+        return {
+            ebayUrl: listingUrlForMarketplace(marketplaceId, listingId),
+            ebayItemId: null,
+        };
     }
 
     const createBody = buildOfferCreateBody(listing, sku);
@@ -360,23 +377,61 @@ export async function createEbayListing(
         throw new Error("eBay publish succeeded but no listing id was returned.");
     }
 
-    return listingUrlForMarketplace(marketplaceId, listingId);
+    return {
+        ebayUrl: listingUrlForMarketplace(marketplaceId, listingId),
+        ebayItemId: null,
+    };
 }
+
+
+// CREATE EBAY LISTING
+export async function createEbayListing(
+    listing: ResaleListingData,
+    images: ListingImageRow[],
+): Promise<EbayListingResult> {
+    /**
+     * Publishes a resale on eBay, dispatching automatically based on the eBay
+     * category: vehicle categories (UK Cars, Motorcycles & Vehicles tree and
+     * any overrides in AUTO_ADS_EBAY_VEHICLE_CATEGORY_IDS) are published as
+     * Classified Ads via the Trading API because the Inventory API rejects
+     * them; every other category continues to use the REST Sell Inventory
+     * API flow.
+     */
+
+    if (!listing.id) {
+        throw new Error("Listing must be saved before publishing to eBay.");
+    }
+
+    if (isVehicleCategory(listing.ebayCategoryId)) {
+        const result = await createOrReviseClassifiedAd(listing, images);
+        return {ebayUrl: result.ebayUrl, ebayItemId: result.itemId};
+    }
+
+    return createEbayListingInventory(listing, images);
+}
+
 
 // CREATE EBAY LISTING SAFE
 export async function createEbayListingSafe(
     listing: ResaleListingData,
     images: ListingImageRow[],
-): Promise<{success: true; ebayUrl: string} | {success: false; error: string}> {
+): Promise<
+    | {success: true; ebayUrl: string; ebayItemId: string | null}
+    | {success: false; error: string}
+> {
     /**
-     * Wraps createEbayListing and returns a result object suitable for server actions.
+     * Wraps createEbayListing and returns a result object suitable for server
+     * actions. Uses the Trading-specific error formatter when the dispatch
+     * took the Trading path so the caller sees the actual XML error text.
      */
 
+    const usedTrading = isVehicleCategory(listing.ebayCategoryId);
     try {
-        const ebayUrl = await createEbayListing(listing, images);
-        return {success: true, ebayUrl};
+        const result = await createEbayListing(listing, images);
+        return {success: true, ebayUrl: result.ebayUrl, ebayItemId: result.ebayItemId};
     } catch (err) {
         console.error("eBay listing creation failed:", err);
-        return {success: false, error: formatEbayError(err)};
+        const message = usedTrading ? formatTradingError(err) : formatEbayError(err);
+        return {success: false, error: message};
     }
 }

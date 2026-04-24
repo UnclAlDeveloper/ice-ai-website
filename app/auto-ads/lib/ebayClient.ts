@@ -80,6 +80,7 @@ export async function getEbayApiClient(): Promise<eBayApi> {
 
     const appId = process.env.AUTO_ADS_EBAY_CLIENT_ID;
     const certId = process.env.AUTO_ADS_EBAY_CLIENT_SECRET;
+    const devId = process.env.AUTO_ADS_EBAY_DEV_ID?.trim();
     const refreshToken = await resolveEbayRefreshToken();
     const marketplaceId = (process.env.AUTO_ADS_EBAY_MARKETPLACE_ID?.trim() ||
         eBayApi.MarketplaceId.EBAY_GB) as EbayMarketplaceId;
@@ -100,6 +101,7 @@ export async function getEbayApiClient(): Promise<eBayApi> {
     const ebay = new eBayApi({
         appId,
         certId,
+        ...(devId ? {devId} : {}),
         sandbox: ebayUseSandbox(),
         marketplaceId,
         contentLanguage,

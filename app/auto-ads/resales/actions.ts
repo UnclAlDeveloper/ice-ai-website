@@ -49,6 +49,7 @@ export type ResaleListingData = {
     aiSellPriceHigh: number | null;
     adsPrice: number | null;
     ebayCategoryId: string | null;
+    ebayItemId: string | null;
     eBayUrl: string;
     facebookUrl: string;
 };
@@ -154,6 +155,7 @@ export async function getResaleListing(id: number): Promise<{
                 aiSellPriceHigh: resaleListings.aiSellPriceHigh,
                 adsPrice: resaleListings.adsPrice,
                 ebayCategoryId: resaleListings.ebayCategoryId,
+                ebayItemId: resaleListings.ebayItemId,
                 eBayUrl: resaleListings.eBayUrl,
                 facebookUrl: resaleListings.facebookUrl,
             })
@@ -235,6 +237,7 @@ export async function saveResaleListing(data: ResaleListingData): Promise<{
                     aiSellPriceHigh: data.aiSellPriceHigh,
                     adsPrice: data.adsPrice,
                     ebayCategoryId: data.ebayCategoryId,
+                    ebayItemId: data.ebayItemId,
                     eBayUrl: data.eBayUrl,
                     facebookUrl: data.facebookUrl,
                     updatedAt: now,
@@ -291,6 +294,7 @@ export async function saveResaleListing(data: ResaleListingData): Promise<{
                 aiSellPriceHigh: data.aiSellPriceHigh,
                 adsPrice: data.adsPrice,
                 ebayCategoryId: data.ebayCategoryId,
+                ebayItemId: data.ebayItemId,
                 eBayUrl: data.eBayUrl,
                 facebookUrl: data.facebookUrl,
             })
