@@ -1,6 +1,6 @@
 import eBayApi from "ebay-api";
-import type {ResaleListingData} from "@app/auto-ads/resales/actions";
-import {getEbayApiClient} from "@app/auto-ads/lib/ebayClient";
+import type {resaleListing} from "@app/auto-ads/resales/actions";
+import {ebayUseSandbox, getEbayApiClient} from "@app/auto-ads/lib/ebayClient";
 import {
     createOrReviseClassifiedAd,
     formatTradingError,
@@ -77,7 +77,7 @@ function addAspect(aspects: Record<string, string[]>, name: string, value: strin
 }
 
 // BUILD ASPECTS
-function buildAspects(listing: ResaleListingData): Record<string, string[]> {
+function buildAspects(listing: resaleListing): Record<string, string[]> {
     /**
      * Maps resale vehicle fields to eBay product aspects (item specifics).
      */
@@ -120,7 +120,7 @@ export function resaleListingSku(listingId: number): string {
 
 // BUILD INVENTORY ITEM BODY
 export function buildInventoryItemBody(
-    listing: ResaleListingData,
+    listing: resaleListing,
     images: ListingImageRow[],
 ): Record<string, unknown> {
     /**
@@ -139,7 +139,7 @@ export function buildInventoryItemBody(
     }
 
     return {
-        condition: "USED",
+        condition: "USED_GOOD",
         product: {
             title: truncateTitle(listing.shortDescription),
             description,
@@ -161,7 +161,7 @@ export function buildInventoryItemBody(
 }
 
 // BUILD OFFER CREATE BODY
-function buildOfferCreateBody(listing: ResaleListingData, sku: string): Record<string, unknown> {
+function buildOfferCreateBody(listing: resaleListing, sku: string): Record<string, unknown> {
     /**
      * Builds the payload for createOffer including policies, price, and category.
      */
@@ -213,7 +213,7 @@ function buildOfferCreateBody(listing: ResaleListingData, sku: string): Record<s
 }
 
 // BUILD OFFER UPDATE BODY
-function buildOfferUpdateBody(listing: ResaleListingData): Record<string, unknown> {
+function buildOfferUpdateBody(listing: resaleListing): Record<string, unknown> {
     /**
      * Builds the payload for updateOffer (fields allowed without sku/marketplaceId).
      */
@@ -264,34 +264,69 @@ function listingUrlForMarketplace(marketplaceId: string, listingId: string): str
      * Returns a consumer-facing item URL for the published listing id.
      */
 
+    const sandboxPrefix = ebayUseSandbox() ? "sandbox." : "";
     if (marketplaceId === eBayApi.MarketplaceId.EBAY_GB) {
-        return `https://www.ebay.co.uk/itm/${listingId}`;
+        return `https://www.${sandboxPrefix}ebay.co.uk/itm/${listingId}`;
     }
     if (marketplaceId === eBayApi.MarketplaceId.EBAY_US) {
-        return `https://www.ebay.com/itm/${listingId}`;
+        return `https://www.${sandboxPrefix}ebay.com/itm/${listingId}`;
     }
-    return `https://www.ebay.com/itm/${listingId}`;
+    return `https://www.${sandboxPrefix}ebay.com/itm/${listingId}`;
 }
 
 // FORMAT EBAY ERROR
 function formatEbayError(err: unknown): string {
     /**
-     * Extracts a readable message from an eBay API or axios error.
+     * Extracts a readable message from an eBay REST API or axios error,
+     * returning every reported error on its own line (with error id,
+     * category and any parameter hints) so the caller can surface the
+     * full set of issues rather than just the first one.
      */
 
-    if (err instanceof Error) {
-        const anyErr = err as Error & {meta?: {res?: {data?: unknown}}};
-        const data = anyErr.meta?.res?.data;
-        if (data && typeof data === "object" && "errors" in data) {
-            const errors = (data as {errors?: {message?: string; longMessage?: string}[]}).errors;
-            if (Array.isArray(errors) && errors.length > 0) {
-                const first = errors[0];
-                return first.longMessage || first.message || err.message;
+    if (!(err instanceof Error)) return String(err);
+
+    type EbayRestParameter = {name?: string; value?: string | number};
+    type EbayRestError = {
+        errorId?: string | number;
+        domain?: string;
+        category?: string;
+        message?: string;
+        longMessage?: string;
+        parameters?: EbayRestParameter[];
+    };
+    const anyErr = err as Error & {meta?: {res?: {data?: unknown}}};
+    const data = anyErr.meta?.res?.data;
+    if (data && typeof data === "object" && "errors" in data) {
+        const errors = (data as {errors?: EbayRestError[]}).errors;
+        if (Array.isArray(errors) && errors.length > 0) {
+            const lines: string[] = [];
+            for (const entry of errors) {
+                if (!entry || typeof entry !== "object") continue;
+                const codeParts: string[] = [];
+                if (entry.category) codeParts.push(entry.category);
+                if (entry.errorId !== undefined) codeParts.push(`id ${entry.errorId}`);
+                const prefix = codeParts.length > 0 ? `[${codeParts.join(" ")}] ` : "";
+                const body =
+                    entry.longMessage ||
+                    entry.message ||
+                    (entry.errorId !== undefined ? `eBay error ${entry.errorId}` : "");
+                if (!prefix && !body) continue;
+
+                // include any parameter hints (e.g. which field caused the issue)
+                const paramText = Array.isArray(entry.parameters)
+                    ? entry.parameters
+                        .map((p) => (p?.name ? `${p.name}=${p.value ?? ""}` : String(p?.value ?? "")))
+                        .filter(Boolean)
+                        .join(", ")
+                    : "";
+                const suffix = paramText ? ` (${paramText})` : "";
+
+                lines.push(`${prefix}${body}${suffix}`.trim());
             }
+            if (lines.length > 0) return lines.join("\n");
         }
-        return err.message;
     }
-    return String(err);
+    return err.message;
 }
 
 // EBAY LISTING RESULT
@@ -303,9 +338,126 @@ export type EbayListingResult = {ebayUrl: string; ebayItemId: string | null};
  */
 
 
+// EXTRACT LISTING ID FROM URL
+function extractListingIdFromEbayUrl(ebayUrl: string | null | undefined): string | null {
+    /**
+     * Extracts the numeric listing id from an eBay item URL such as
+     * https://www.ebay.co.uk/itm/123456789012.
+     */
+
+    if (!ebayUrl?.trim()) return null;
+    const m = ebayUrl.match(/\/itm\/(\d+)/i);
+    return m?.[1] ?? null;
+}
+
+
+// CANCEL EBAY LISTING INVENTORY
+async function cancelEbayListingInventory(
+    listing: resaleListing,
+    listingIdToCancel: string,
+): Promise<void> {
+    /**
+     * Cancels a published non-vehicle listing by finding the corresponding
+     * offer for the resale SKU and withdrawing that offer.
+     */
+
+    const ebay = await getEbayApiClient();
+    const sku = resaleListingSku(listing.id!);
+    const marketplaceId =
+        process.env.AUTO_ADS_EBAY_MARKETPLACE_ID?.trim() || eBayApi.MarketplaceId.EBAY_GB;
+    type OfferRow = {
+        offerId?: string;
+        sku?: string;
+        listing?: {listingId?: string};
+    };
+
+    const offersResponse = await ebay.sell.inventory.getOffers({sku, marketplaceId});
+    const offers = (offersResponse?.offers ?? []) as OfferRow[];
+    const matched = offers.find((offer) => offer.listing?.listingId === listingIdToCancel);
+
+    if (!matched?.offerId) {
+        throw new Error("Could not find the published eBay offer to cancel for this listing.");
+    }
+
+    await ebay.sell.inventory.withdrawOffer(matched.offerId);
+}
+
+
+// CANCEL EBAY LISTING TRADING
+async function cancelEbayListingTrading(listingIdToCancel: string): Promise<void> {
+    /**
+     * Cancels a vehicle/classified listing via Trading API EndItem.
+     */
+
+    const ebay = await getEbayApiClient();
+    const tradingClient = (ebay as unknown as {
+        trading: {EndItem: (body: unknown) => Promise<unknown>};
+    }).trading;
+    await tradingClient.EndItem({
+        ItemID: listingIdToCancel,
+        EndingReason: "NotAvailable",
+    });
+}
+
+
+// CANCEL EBAY LISTING
+export async function cancelEbayListing(
+    listing: resaleListing,
+): Promise<void> {
+    /**
+     * Cancels the current eBay listing by extracting its item/listing id from
+     * the stored eBay URL, then dispatching to Trading EndItem for vehicle
+     * routes or Inventory withdrawOffer for non-vehicle routes.
+     */
+
+    if (!listing.id) {
+        throw new Error("Listing must be saved before cancelling on eBay.");
+    }
+
+    const listingIdToCancel = extractListingIdFromEbayUrl(listing.eBayUrl);
+    if (!listingIdToCancel) {
+        throw new Error("Could not extract an eBay listing id from the stored URL.");
+    }
+
+    if (await isVehicleCategory(listing.ebayCategoryId)) {
+        await cancelEbayListingTrading(listingIdToCancel);
+        return;
+    }
+
+    await cancelEbayListingInventory(listing, listingIdToCancel);
+}
+
+
+// CANCEL EBAY LISTING SAFE
+export async function cancelEbayListingSafe(
+    listing: resaleListing,
+): Promise<{success: true} | {success: false; error: string}> {
+    /**
+     * Wraps cancelEbayListing and returns a structured result suitable for
+     * server actions. Formats Trading and Inventory errors consistently with
+     * the create/update publish path.
+     */
+
+    const usedTrading = await isVehicleCategory(listing.ebayCategoryId);
+    try {
+        await cancelEbayListing(listing);
+        return {success: true};
+    } catch (err) {
+        console.error("eBay listing cancellation failed:", err);
+        const message = usedTrading ? formatTradingError(err) : formatEbayError(err);
+        // EndItem returns this when the listing has already ended; treat cancel
+        // as idempotent success so local eBayUrl can still be cleared.
+        if (/auction has been closed|listing has ended|item has ended|already ended/i.test(message)) {
+            return {success: true};
+        }
+        return {success: false, error: message};
+    }
+}
+
+
 // CREATE EBAY LISTING INVENTORY
 async function createEbayListingInventory(
-    listing: ResaleListingData,
+    listing: resaleListing,
     images: ListingImageRow[],
 ): Promise<EbayListingResult> {
     /**
@@ -386,7 +538,7 @@ async function createEbayListingInventory(
 
 // CREATE EBAY LISTING
 export async function createEbayListing(
-    listing: ResaleListingData,
+    listing: resaleListing,
     images: ListingImageRow[],
 ): Promise<EbayListingResult> {
     /**
@@ -402,7 +554,7 @@ export async function createEbayListing(
         throw new Error("Listing must be saved before publishing to eBay.");
     }
 
-    if (isVehicleCategory(listing.ebayCategoryId)) {
+    if (await isVehicleCategory(listing.ebayCategoryId)) {
         const result = await createOrReviseClassifiedAd(listing, images);
         return {ebayUrl: result.ebayUrl, ebayItemId: result.itemId};
     }
@@ -413,7 +565,7 @@ export async function createEbayListing(
 
 // CREATE EBAY LISTING SAFE
 export async function createEbayListingSafe(
-    listing: ResaleListingData,
+    listing: resaleListing,
     images: ListingImageRow[],
 ): Promise<
     | {success: true; ebayUrl: string; ebayItemId: string | null}
@@ -425,7 +577,7 @@ export async function createEbayListingSafe(
      * took the Trading path so the caller sees the actual XML error text.
      */
 
-    const usedTrading = isVehicleCategory(listing.ebayCategoryId);
+    const usedTrading = await isVehicleCategory(listing.ebayCategoryId);
     try {
         const result = await createEbayListing(listing, images);
         return {success: true, ebayUrl: result.ebayUrl, ebayItemId: result.ebayItemId};

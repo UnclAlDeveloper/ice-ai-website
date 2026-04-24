@@ -6,58 +6,10 @@ import {eq, ne} from "drizzle-orm";
 import {getServerSessionFromCookies} from "@app/lib/session";
 import {revalidatePath} from "next/cache";
 
-// RESALE LISTING DATA
-export type ResaleListingData = {
-    id?: number;
-    prospectId?: number | null;
-    status: string;
-    makeAndModel: string;
-    shortDescription: string;
-    fullDescription: string | null;
-    mileage: number | null;
-    mileageUnit: string | null;
-    year: number | null;
-    registration: string | null;
-    currencySymbol: string | null;
-    askingPrice: number | null;
-    vatStatus: string | null;
-    location: string | null;
-    bodyType: string | null;
-    cabType: string | null;
-    fuelType: string | null;
-    gearboxType: string | null;
-    wheelbase: string | null;
-    engineSize: string | null;
-    colour: string | null;
-    seats: number | null;
-    emissionClass: string | null;
-    numberOfOwners: number | null;
-    serviceHistory: string | null;
-    basicHistoryCheck: string | null;
-    motStatus: string | null;
-    motExpiry: string | null;
-    specsAndFeatures: string | null;
-    taxStatus: string | null;
-    taxDueDate: string | null;
-    co2Emissions: number | null;
-    markedForExport: boolean | null;
-    dateOfLastV5CIssued: string | null;
-    monthOfFirstRegistration: string | null;
-    typeApproval: string | null;
-    revenueWeight: number | null;
-    aiSellPriceLow: number | null;
-    aiSellPriceHigh: number | null;
-    adsPrice: number | null;
-    ebayCategoryId: string | null;
-    ebayItemId: string | null;
-    eBayUrl: string;
-    facebookUrl: string;
-};
+// RESALE LISTING
+export type resaleListing = typeof resaleListings.$inferSelect;
 /**
- * Shape of resale listing data sent from and returned to the editor form.
- * Includes an optional `id` to distinguish inserts from updates. Compared to
- * prospect listings, the status enum is narrower ('Bought' | 'Sold') and the
- * resale-specific fields ebayCategoryId, eBayUrl, facebookUrl, and adsPrice are present.
+ * Row shape for aa.resale_listings inferred directly from Drizzle schema.
  */
 
 // GET RESALE LISTINGS
@@ -98,7 +50,7 @@ export async function getResaleListings(): Promise<{
 // GET RESALE LISTING
 export async function getResaleListing(id: number): Promise<{
     success: boolean;
-    listing?: ResaleListingData;
+    listing?: resaleListing;
     error?: string;
 }> {
     /**
@@ -113,52 +65,7 @@ export async function getResaleListing(id: number): Promise<{
 
     try {
         const [row] = await getAutoAdsDb()
-            .select({
-                id: resaleListings.id,
-                prospectId: resaleListings.prospectId,
-                status: resaleListings.status,
-                makeAndModel: resaleListings.makeAndModel,
-                shortDescription: resaleListings.shortDescription,
-                fullDescription: resaleListings.fullDescription,
-                mileage: resaleListings.mileage,
-                mileageUnit: resaleListings.mileageUnit,
-                year: resaleListings.year,
-                registration: resaleListings.registration,
-                currencySymbol: resaleListings.currencySymbol,
-                askingPrice: resaleListings.askingPrice,
-                vatStatus: resaleListings.vatStatus,
-                location: resaleListings.location,
-                bodyType: resaleListings.bodyType,
-                cabType: resaleListings.cabType,
-                fuelType: resaleListings.fuelType,
-                gearboxType: resaleListings.gearboxType,
-                wheelbase: resaleListings.wheelbase,
-                engineSize: resaleListings.engineSize,
-                colour: resaleListings.colour,
-                seats: resaleListings.seats,
-                emissionClass: resaleListings.emissionClass,
-                numberOfOwners: resaleListings.numberOfOwners,
-                serviceHistory: resaleListings.serviceHistory,
-                basicHistoryCheck: resaleListings.basicHistoryCheck,
-                motStatus: resaleListings.motStatus,
-                motExpiry: resaleListings.motExpiry,
-                specsAndFeatures: resaleListings.specsAndFeatures,
-                taxStatus: resaleListings.taxStatus,
-                taxDueDate: resaleListings.taxDueDate,
-                co2Emissions: resaleListings.co2Emissions,
-                markedForExport: resaleListings.markedForExport,
-                dateOfLastV5CIssued: resaleListings.dateOfLastV5CIssued,
-                monthOfFirstRegistration: resaleListings.monthOfFirstRegistration,
-                typeApproval: resaleListings.typeApproval,
-                revenueWeight: resaleListings.revenueWeight,
-                aiSellPriceLow: resaleListings.aiSellPriceLow,
-                aiSellPriceHigh: resaleListings.aiSellPriceHigh,
-                adsPrice: resaleListings.adsPrice,
-                ebayCategoryId: resaleListings.ebayCategoryId,
-                ebayItemId: resaleListings.ebayItemId,
-                eBayUrl: resaleListings.eBayUrl,
-                facebookUrl: resaleListings.facebookUrl,
-            })
+            .select()
             .from(resaleListings)
             .where(eq(resaleListings.id, id));
 
@@ -174,7 +81,7 @@ export async function getResaleListing(id: number): Promise<{
 }
 
 // SAVE RESALE LISTING
-export async function saveResaleListing(data: ResaleListingData): Promise<{
+export async function saveResaleListing(data: resaleListing): Promise<{
     success: boolean;
     id?: number;
     error?: string;
@@ -193,111 +100,25 @@ export async function saveResaleListing(data: ResaleListingData): Promise<{
     try {
         const now = new Date().toISOString();
 
-        if (data.id) {
+        // strip fields managed by the database / this function so we can
+        // spread the rest straight into the insert/update values
+        const {id, createdAt: _createdAt, updatedAt: _updatedAt, ...rest} = data;
+
+        if (id) {
             // update existing listing
             await getAutoAdsDb()
                 .update(resaleListings)
-                .set({
-                    status: data.status as typeof resaleListings.$inferInsert.status,
-                    makeAndModel: data.makeAndModel,
-                    shortDescription: data.shortDescription,
-                    fullDescription: data.fullDescription,
-                    mileage: data.mileage,
-                    mileageUnit: data.mileageUnit,
-                    year: data.year,
-                    registration: data.registration,
-                    currencySymbol: data.currencySymbol,
-                    askingPrice: data.askingPrice,
-                    vatStatus: data.vatStatus,
-                    location: data.location,
-                    bodyType: data.bodyType,
-                    cabType: data.cabType,
-                    fuelType: data.fuelType,
-                    gearboxType: data.gearboxType,
-                    wheelbase: data.wheelbase,
-                    engineSize: data.engineSize,
-                    colour: data.colour,
-                    seats: data.seats,
-                    emissionClass: data.emissionClass,
-                    numberOfOwners: data.numberOfOwners,
-                    serviceHistory: data.serviceHistory,
-                    basicHistoryCheck: data.basicHistoryCheck,
-                    motStatus: data.motStatus,
-                    motExpiry: data.motExpiry,
-                    specsAndFeatures: data.specsAndFeatures,
-                    taxStatus: data.taxStatus,
-                    taxDueDate: data.taxDueDate,
-                    co2Emissions: data.co2Emissions,
-                    markedForExport: data.markedForExport,
-                    dateOfLastV5CIssued: data.dateOfLastV5CIssued,
-                    monthOfFirstRegistration: data.monthOfFirstRegistration,
-                    typeApproval: data.typeApproval,
-                    revenueWeight: data.revenueWeight,
-                    aiSellPriceLow: data.aiSellPriceLow,
-                    aiSellPriceHigh: data.aiSellPriceHigh,
-                    adsPrice: data.adsPrice,
-                    ebayCategoryId: data.ebayCategoryId,
-                    ebayItemId: data.ebayItemId,
-                    eBayUrl: data.eBayUrl,
-                    facebookUrl: data.facebookUrl,
-                    updatedAt: now,
-                })
-                .where(eq(resaleListings.id, data.id));
+                .set({...rest, updatedAt: now})
+                .where(eq(resaleListings.id, id));
 
             revalidatePath("/auto-ads/resales");
-            return {success: true, id: data.id};
+            return {success: true, id};
         }
 
-        // insert new listing
+        // insert new listing; let the database assign the serial id
         const [inserted] = await getAutoAdsDb()
             .insert(resaleListings)
-            .values({
-                createdAt: now,
-                updatedAt: now,
-                listingSource: "ManualEntry",
-                status: data.status as typeof resaleListings.$inferInsert.status,
-                makeAndModel: data.makeAndModel,
-                shortDescription: data.shortDescription,
-                fullDescription: data.fullDescription,
-                mileage: data.mileage,
-                mileageUnit: data.mileageUnit,
-                year: data.year,
-                registration: data.registration,
-                currencySymbol: data.currencySymbol,
-                askingPrice: data.askingPrice,
-                vatStatus: data.vatStatus,
-                location: data.location,
-                bodyType: data.bodyType,
-                cabType: data.cabType,
-                fuelType: data.fuelType,
-                gearboxType: data.gearboxType,
-                wheelbase: data.wheelbase,
-                engineSize: data.engineSize,
-                colour: data.colour,
-                seats: data.seats,
-                emissionClass: data.emissionClass,
-                numberOfOwners: data.numberOfOwners,
-                serviceHistory: data.serviceHistory,
-                basicHistoryCheck: data.basicHistoryCheck,
-                motStatus: data.motStatus,
-                motExpiry: data.motExpiry,
-                specsAndFeatures: data.specsAndFeatures,
-                taxStatus: data.taxStatus,
-                taxDueDate: data.taxDueDate,
-                co2Emissions: data.co2Emissions,
-                markedForExport: data.markedForExport,
-                dateOfLastV5CIssued: data.dateOfLastV5CIssued,
-                monthOfFirstRegistration: data.monthOfFirstRegistration,
-                typeApproval: data.typeApproval,
-                revenueWeight: data.revenueWeight,
-                aiSellPriceLow: data.aiSellPriceLow,
-                aiSellPriceHigh: data.aiSellPriceHigh,
-                adsPrice: data.adsPrice,
-                ebayCategoryId: data.ebayCategoryId,
-                ebayItemId: data.ebayItemId,
-                eBayUrl: data.eBayUrl,
-                facebookUrl: data.facebookUrl,
-            })
+            .values({...rest, createdAt: now, updatedAt: now})
             .returning({id: resaleListings.id});
 
         revalidatePath("/auto-ads/resales");

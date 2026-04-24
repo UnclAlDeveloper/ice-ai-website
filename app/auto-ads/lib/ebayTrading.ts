@@ -1,6 +1,9 @@
 import eBayApi from "ebay-api";
-import type {ResaleListingData} from "@app/auto-ads/resales/actions";
-import {getEbayApiClient} from "@app/auto-ads/lib/ebayClient";
+import {and, eq} from "drizzle-orm";
+import type {resaleListing} from "@app/auto-ads/resales/actions";
+import {ebayUseSandbox, getEbayApiClient} from "@app/auto-ads/lib/ebayClient";
+import {getAutoAdsDb} from "@app/lib/autoAdsDb";
+import {lookups} from "@/drizzle/auto-ads/schema";
 
 // LISTING IMAGE ROW
 type ListingImageRow = {id: number; url: string; isPrimary: boolean | null};
@@ -17,51 +20,64 @@ export type ClassifiedAdResult = {ebayUrl: string; itemId: string};
  * and the raw Trading API ItemID (needed for future ReviseItem calls).
  */
 
-// DEFAULT VEHICLE CATEGORY IDS
-const DEFAULT_VEHICLE_CATEGORY_IDS: readonly string[] = [
-    "9800",
-    "9801",
-    "29690",
-    "177681",
-    "63732",
-    "50054",
-    "10118",
-    "66466",
-    "6001",
-    "6024",
-    "6028",
-    "10063",
-] as const;
+// EBAY CATEGORY LOOKUP TYPE
+const EBAY_CATEGORY_LOOKUP_TYPE = "ebay_categories";
 /**
- * Default set of eBay category IDs (UK Motors under 9800 and US Motors under
- * 6000) that must be published via the Trading API as Classified Ads
- * because the REST Sell Inventory API rejects vehicle listings in these
- * categories. Can be overridden with AUTO_ADS_EBAY_VEHICLE_CATEGORY_IDS.
+ * lookup_type value used to store eBay category options in the aa.lookups
+ * table. The row's `description` column drives routing: rows whose
+ * description equals 'vehicle' (case-insensitive) publish via the Trading
+ * API as Classified Ads; everything else publishes through the REST Sell
+ * Inventory API.
  */
 
+// VEHICLE DESCRIPTION TAG
+const VEHICLE_DESCRIPTION_TAG = "vehicle";
+/** Case-insensitive marker expected in aa.lookups.description for vehicle categories. */
+
 // IS VEHICLE CATEGORY
-export function isVehicleCategory(categoryId: string | null | undefined): boolean {
+export async function isVehicleCategory(categoryId: string | null | undefined): Promise<boolean> {
     /**
      * Returns true when the given eBay category id should be published as a
-     * Classified Ad through the Trading API. If
-     * AUTO_ADS_EBAY_VEHICLE_CATEGORY_IDS is set (comma-separated), that list
-     * replaces the built-in default set; otherwise the default set is used.
+     * Classified Ad through the Trading API. Routing is driven by the
+     * `description` column on the aa.lookups row for this category
+     * (description = 'vehicle' means use Trading). The
+     * AUTO_ADS_EBAY_VEHICLE_CATEGORY_IDS environment variable
+     * (comma-separated) is still honoured as a short-circuit override for
+     * cases where the database has not yet been seeded with the flag.
      */
 
     if (!categoryId?.trim()) return false;
     const id = categoryId.trim();
 
-    // env override wins so operators can adjust without a deploy
+    // env override wins so operators can force the trading path without a
+    // database change in an emergency
     const override = process.env.AUTO_ADS_EBAY_VEHICLE_CATEGORY_IDS?.trim();
     if (override) {
         const ids = override
             .split(",")
             .map((s) => s.trim())
             .filter(Boolean);
-        return ids.includes(id);
+        if (ids.includes(id)) return true;
     }
 
-    return DEFAULT_VEHICLE_CATEGORY_IDS.includes(id);
+    // consult the lookups table for the category's routing tag
+    try {
+        const [row] = await getAutoAdsDb()
+            .select({description: lookups.description})
+            .from(lookups)
+            .where(and(
+                eq(lookups.lookupType, EBAY_CATEGORY_LOOKUP_TYPE),
+                eq(lookups.code, id),
+            ))
+            .limit(1);
+        const desc = row?.description?.trim().toLowerCase();
+        return desc === VEHICLE_DESCRIPTION_TAG;
+    } catch (err) {
+        // an error here shouldn't prevent all publishing, so fall back to
+        // the safer non-vehicle path and let the caller surface any eBay error
+        console.warn("Failed to look up eBay category routing tag:", err);
+        return false;
+    }
 }
 
 // EBAY TITLE MAX LENGTH
@@ -145,7 +161,7 @@ function addNameValue(
 }
 
 // BUILD ITEM SPECIFICS
-function buildItemSpecifics(listing: ResaleListingData): NameValueList[] {
+function buildItemSpecifics(listing: resaleListing): NameValueList[] {
     /**
      * Maps resale vehicle fields to the Trading API ItemSpecifics structure.
      * This mirrors the aspects built for the Sell Inventory path so buyers
@@ -187,9 +203,10 @@ function listingHostForMarketplace(marketplaceId: string): string {
      * ebay.com.
      */
 
-    if (marketplaceId === eBayApi.MarketplaceId.EBAY_GB) return "https://www.ebay.co.uk";
-    if (marketplaceId === eBayApi.MarketplaceId.EBAY_US) return "https://www.ebay.com";
-    return "https://www.ebay.com";
+    const sandboxPrefix = ebayUseSandbox() ? "sandbox." : "";
+    if (marketplaceId === eBayApi.MarketplaceId.EBAY_GB) return `https://www.${sandboxPrefix}ebay.co.uk`;
+    if (marketplaceId === eBayApi.MarketplaceId.EBAY_US) return `https://www.${sandboxPrefix}ebay.com`;
+    return `https://www.${sandboxPrefix}ebay.com`;
 }
 
 // TRADING SITE FOR MARKETPLACE
@@ -217,18 +234,34 @@ function tradingCountryForMarketplace(marketplaceId: string): string {
     return "GB";
 }
 
+// TRADING CURRENCY FOR MARKETPLACE
+function tradingCurrencyForMarketplace(marketplaceId: string): string {
+    /**
+     * Returns the default currency code expected by the marketplace site for
+     * Trading API listings.
+     */
+
+    if (marketplaceId === eBayApi.MarketplaceId.EBAY_GB) return "GBP";
+    if (marketplaceId === eBayApi.MarketplaceId.EBAY_US) return "USD";
+    return "GBP";
+}
+
 // BUILD CLASSIFIED AD ITEM
 function buildClassifiedAdItem(
-    listing: ResaleListingData,
+    listing: resaleListing,
     images: ListingImageRow[],
     marketplaceId: string,
 ): Record<string, unknown> {
     /**
      * Builds the Trading API Item payload for a Classified Ad
-     * (ListingType=AdType) used by both AddItem and ReviseItem. Classified
+     * (ListingType=LeadGeneration + ListingSubtype2=ClassifiedAd) used by
+     * both AddItem and ReviseItem. Classified
      * Ads do not transact on eBay, so shipping, payment, and return policies
-     * are intentionally omitted; buyer contact comes from the
-     * AUTO_ADS_EBAY_SELLER_* environment variables.
+     * are intentionally omitted. Phone contact is supplied via
+     * SellerContactDetails.PhoneLocalNumber; email contact is a boolean flag
+     * on ExtendedSellerContactDetails and always uses the seller's
+     * registered eBay account email (eBay Trading does not accept an
+     * explicit email value on the item payload).
      */
 
     if (!listing.ebayCategoryId?.trim()) {
@@ -239,19 +272,21 @@ function buildClassifiedAdItem(
     }
 
     // validate classified-ad specific environment configuration
-    const postalCode = process.env.AUTO_ADS_EBAY_SELLER_POSTAL_CODE?.trim();
+    const postalCode = process.env.AUTO_ADS_POSTCODE?.trim();
     if (!postalCode) {
-        throw new Error("AUTO_ADS_EBAY_SELLER_POSTAL_CODE is not set.");
+        throw new Error("AUTO_ADS_POSTCODE is not set.");
     }
-    const sellerEmail = process.env.AUTO_ADS_EBAY_SELLER_EMAIL?.trim();
-    const sellerPhone = process.env.AUTO_ADS_EBAY_SELLER_PHONE?.trim();
-    if (!sellerEmail || !sellerPhone) {
+    // AUTO_ADS_EMAIL is a flag: when set, enable email contact on
+    // the listing; the actual email comes from the seller's eBay account
+    const emailContactFlag = process.env.AUTO_ADS_EMAIL?.trim();
+    const sellerPhone = process.env.AUTO_ADS_PHONE?.trim();
+    if (!emailContactFlag && !sellerPhone) {
         throw new Error(
-            "eBay Classified Ad seller contact is required: set AUTO_ADS_EBAY_SELLER_EMAIL and AUTO_ADS_EBAY_SELLER_PHONE.",
+            "eBay Classified Ad seller contact is required: set AUTO_ADS_PHONE and/or AUTO_ADS_EMAIL.",
         );
     }
 
-    const currency = currencySymbolToIso(listing.currencySymbol);
+    const listingCurrency = currencySymbolToIso(listing.currencySymbol);
     const title = truncateTitle(listing.shortDescription);
     const description = listing.fullDescription?.trim() || listing.shortDescription || "";
     const pictureUrls = sortImageUrls(images);
@@ -265,6 +300,8 @@ function buildClassifiedAdItem(
         process.env.AUTO_ADS_EBAY_CLASSIFIED_DURATION?.trim() || "Days_30";
     const site = tradingSiteForMarketplace(marketplaceId);
     const country = tradingCountryForMarketplace(marketplaceId);
+    const marketplaceCurrency = tradingCurrencyForMarketplace(marketplaceId);
+    const currency = listingCurrency === marketplaceCurrency ? listingCurrency : marketplaceCurrency;
 
     // assemble the trading api item record; ConditionID 3000 is "used"
     const item: Record<string, unknown> = {
@@ -277,16 +314,29 @@ function buildClassifiedAdItem(
         Country: country,
         Currency: currency,
         ListingDuration: duration,
-        ListingType: "AdType",
+        ListingType: "LeadGeneration",
+        ListingSubtype2: "ClassifiedAd",
         Location: location,
         PostalCode: postalCode,
         Quantity: 1,
         Site: site,
-        SellerContactDetails: {
-            Email: sellerEmail,
-            Phone: sellerPhone,
-        },
     };
+
+    // SellerContactDetails is the AddressType container; valid Phone child is
+    // PhoneLocalNumber (not Phone). Email is NOT a child here.
+    if (sellerPhone) {
+        item.SellerContactDetails = {
+            PhoneLocalNumber: sellerPhone,
+        };
+    }
+
+    // email contact on classified ads is enabled via this boolean flag; the
+    // actual address is whichever email is registered on the seller's account
+    if (emailContactFlag) {
+        item.ExtendedSellerContactDetails = {
+            ClassifiedAdContactByEmailEnabled: true,
+        };
+    }
 
     if (pictureUrls.length > 0) {
         item.PictureDetails = {PictureURL: pictureUrls};
@@ -300,7 +350,7 @@ function buildClassifiedAdItem(
 
 // ADD CLASSIFIED AD
 async function addClassifiedAd(
-    listing: ResaleListingData,
+    listing: resaleListing,
     images: ListingImageRow[],
 ): Promise<string> {
     /**
@@ -329,7 +379,7 @@ async function addClassifiedAd(
 
 // REVISE CLASSIFIED AD
 async function reviseClassifiedAd(
-    listing: ResaleListingData,
+    listing: resaleListing,
     images: ListingImageRow[],
     itemId: string,
 ): Promise<void> {
@@ -380,7 +430,7 @@ async function getItemListingStatus(itemId: string): Promise<string | null> {
 
 // CREATE OR REVISE CLASSIFIED AD
 export async function createOrReviseClassifiedAd(
-    listing: ResaleListingData,
+    listing: resaleListing,
     images: ListingImageRow[],
 ): Promise<ClassifiedAdResult> {
     /**
@@ -422,16 +472,22 @@ export function formatTradingError(err: unknown): string {
      * Extracts a human-readable message from an eBay Trading API error. The
      * hendt/ebay-api client attaches the parsed XML response on the thrown
      * error; this helper walks the common locations for the Errors array and
-     * returns LongMessage, falling back to ShortMessage, ErrorCode, or the
-     * raw Error message when nothing structured is available.
+     * returns every entry (one per line) with the error code, severity, long
+     * message and any parameter context, so the caller can show the full set
+     * of issues eBay reported rather than just the first one. Falls back to
+     * the raw Error message when nothing structured is available.
      */
 
     if (!(err instanceof Error)) return String(err);
 
+    type EbayErrorParameter = {ParamID?: string; Value?: string | number};
     type EbayErrorEntry = {
         LongMessage?: string;
         ShortMessage?: string;
         ErrorCode?: string | number;
+        SeverityCode?: string;
+        ErrorClassification?: string;
+        ErrorParameters?: EbayErrorParameter | EbayErrorParameter[];
     };
     type EbayErrorShape = Error & {
         meta?: {
@@ -455,13 +511,39 @@ export function formatTradingError(err: unknown): string {
     for (const container of candidateContainers) {
         if (!container || typeof container !== "object") continue;
         const errors = (container as {Errors?: EbayErrorEntry | EbayErrorEntry[]}).Errors;
-        const first = Array.isArray(errors) ? errors[0] : errors;
-        if (first && typeof first === "object") {
-            const entry = first as EbayErrorEntry;
-            if (entry.LongMessage) return entry.LongMessage;
-            if (entry.ShortMessage) return entry.ShortMessage;
-            if (entry.ErrorCode !== undefined) return `eBay error ${entry.ErrorCode}`;
+        const entries = Array.isArray(errors) ? errors : errors ? [errors] : [];
+        if (entries.length === 0) continue;
+
+        // build one human-readable line per error entry
+        const lines: string[] = [];
+        for (const entry of entries) {
+            if (!entry || typeof entry !== "object") continue;
+            const codeParts: string[] = [];
+            if (entry.SeverityCode) codeParts.push(entry.SeverityCode);
+            if (entry.ErrorCode !== undefined) codeParts.push(`code ${entry.ErrorCode}`);
+            if (entry.ErrorClassification) codeParts.push(entry.ErrorClassification);
+            const prefix = codeParts.length > 0 ? `[${codeParts.join(" ")}] ` : "";
+            const body =
+                entry.LongMessage ||
+                entry.ShortMessage ||
+                (entry.ErrorCode !== undefined ? `eBay error ${entry.ErrorCode}` : "");
+            if (!prefix && !body) continue;
+
+            // include any parameter hints (e.g. which field caused the issue)
+            const params = Array.isArray(entry.ErrorParameters)
+                ? entry.ErrorParameters
+                : entry.ErrorParameters
+                    ? [entry.ErrorParameters]
+                    : [];
+            const paramText = params
+                .map((p) => (p?.ParamID ? `${p.ParamID}=${p.Value ?? ""}` : String(p?.Value ?? "")))
+                .filter(Boolean)
+                .join(", ");
+            const suffix = paramText ? ` (${paramText})` : "";
+
+            lines.push(`${prefix}${body}${suffix}`.trim());
         }
+        if (lines.length > 0) return lines.join("\n");
     }
 
     return err.message;

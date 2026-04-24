@@ -12,7 +12,7 @@ import {
     Autocomplete,
     Typography,
     CircularProgress,
-    Snackbar,
+    Collapse,
     Alert,
     IconButton,
 } from "@mui/material";
@@ -24,9 +24,10 @@ import DeleteIcon from "@mui/icons-material/Delete";
 import SearchIcon from "@mui/icons-material/Search";
 import AutoFixHighIcon from "@mui/icons-material/AutoFixHigh";
 import OpenInNewIcon from "@mui/icons-material/OpenInNew";
+import DownloadIcon from "@mui/icons-material/Download";
 import { saveResaleListing } from "../resales/actions";
-import type { ResaleListingData } from "../resales/actions";
-import { fetchListingImages, uploadListingImage, deleteListingImage, detectNumberplate, lookupRegistration, generateResaleDescription, generateResaleSellPrice, createEbayListingAction } from "./actions";
+import type { resaleListing } from "../resales/actions";
+import { fetchListingImages, uploadListingImage, deleteListingImage, detectNumberplate, lookupRegistration, generateResaleDescription, generateResaleSellPrice, createEbayListingAction, cancelEbayListingAction, buildFacebookListingPayloadAction, saveResaleFacebookUrl } from "./actions";
 import type { DvlaVehicleData } from "./actions";
 import { deriveShortDescription } from "../lib/deriveShortDescription";
 
@@ -35,7 +36,7 @@ const STATUS_OPTIONS = ["Bought", "Sold"] as const;
 /** Resale listing statuses matching the resale_listing_status database enum. */
 
 // AUTOCOMPLETE FIELD CONFIG
-const AUTOCOMPLETE_FIELDS: { key: keyof ResaleListingData; label: string; lookupType: string }[] = [
+const AUTOCOMPLETE_FIELDS: { key: keyof resaleListing; label: string; lookupType: string }[] = [
     { key: "makeAndModel", label: "Make & Model", lookupType: "make_and_model" },
     { key: "location", label: "Location", lookupType: "location" },
     { key: "bodyType", label: "Body Type", lookupType: "body_type" },
@@ -51,10 +52,10 @@ const AUTOCOMPLETE_FIELDS: { key: keyof ResaleListingData; label: string; lookup
 
 // RESALE LISTING EDITOR PROPS
 interface ResaleListingEditorProps {
-    data: ResaleListingData;
+    data: resaleListing;
     lookupMap: Record<string, string[]>;
     ebayCategories: { code: string; value: string | null }[];
-    onSaved?: (data: ResaleListingData) => void;
+    onSaved?: (data: resaleListing) => void;
     pendingPrimaryImage?: File | null;
     onPendingImageConsumed?: () => void;
     canUseAiSellPrice: boolean;
@@ -86,7 +87,7 @@ export default function ResaleListingEditor({
      * the narrower 'Bought'/'Sold' status enum.
      */
 
-    const [formData, setFormData] = useState<ResaleListingData>(data);
+    const [formData, setFormData] = useState<resaleListing>(data);
     const [saving, setSaving] = useState(false);
     const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: "success" | "error" }>({
         open: false,
@@ -135,9 +136,27 @@ export default function ResaleListingEditor({
     const [generatingDescription, setGeneratingDescription] = useState(false);
     const [generatingPrice, setGeneratingPrice] = useState(false);
     const [ebayCreating, setEbayCreating] = useState(false);
+    const [ebayCancelling, setEbayCancelling] = useState(false);
+    const [facebookWorking, setFacebookWorking] = useState(false);
+    const [facebookUrlInput, setFacebookUrlInput] = useState<string>(data.facebookUrl ?? "");
+    const [facebookUrlSaving, setFacebookUrlSaving] = useState(false);
+
+    // keep the facebook url input in sync when the parent switches listing
+    useEffect(() => {
+        setFacebookUrlInput(data.facebookUrl ?? "");
+    }, [data.facebookUrl, data.id]);
+
+    // auto-close success notifications; keep errors open until manually closed
+    useEffect(() => {
+        if (!snackbar.open || snackbar.severity !== "success") return;
+        const timeoutId = setTimeout(() => {
+            setSnackbar((prev) => (prev.open && prev.severity === "success" ? {...prev, open: false} : prev));
+        }, 4000);
+        return () => clearTimeout(timeoutId);
+    }, [snackbar.open, snackbar.severity, snackbar.message]);
 
     // SET FIELD
-    const setField = (key: keyof ResaleListingData, value: string | number | boolean | null) => {
+    const setField = (key: keyof resaleListing, value: string | number | boolean | null) => {
         /**
          * Updates a single field in the local form state.
          */
@@ -162,7 +181,7 @@ export default function ResaleListingEditor({
             for (const key of keys) {
                 const dvlaValue = dvla[key];
                 if (dvlaValue == null) continue;
-                const current = prev[key as keyof ResaleListingData];
+                const current = prev[key as keyof resaleListing];
                 const isEmpty = current === null || current === undefined || current === "" || current === 0;
                 if (isEmpty) {
                     (next as Record<string, unknown>)[key] = dvlaValue;
@@ -176,7 +195,7 @@ export default function ResaleListingEditor({
                 if (derived) next.shortDescription = derived;
             }
 
-            return next as ResaleListingData;
+            return next as resaleListing;
         });
         return filled;
     };
@@ -408,6 +427,29 @@ export default function ResaleListingEditor({
         }
     };
 
+    // HANDLE EBAY CANCEL
+    const handleEbayCancel = async () => {
+        /**
+         * Cancels the currently published eBay listing and clears the stored URL.
+         */
+
+        if (!formData.id || !formData.eBayUrl || !canUseAiSellPrice) return;
+        setEbayCancelling(true);
+        try {
+            const result = await cancelEbayListingAction(formData.id);
+            if (result.success) {
+                setFormData((prev) => ({ ...prev, eBayUrl: null, ebayItemId: null }));
+                setSnackbar({ open: true, message: "eBay listing cancelled successfully", severity: "success" });
+            } else {
+                setSnackbar({ open: true, message: result.error || "eBay cancellation failed", severity: "error" });
+            }
+        } catch (err) {
+            setSnackbar({ open: true, message: err instanceof Error ? err.message : "eBay cancellation failed", severity: "error" });
+        } finally {
+            setEbayCancelling(false);
+        }
+    };
+
     const ebayPublishDisabled =
         !formData.id ||
         !canUseAiSellPrice ||
@@ -416,6 +458,114 @@ export default function ResaleListingEditor({
         formData.askingPrice < 0 ||
         imageList.length === 0 ||
         ebayCreating;
+
+    // HANDLE FACEBOOK ASSIST
+    const handleFacebookAssist = async () => {
+        /**
+         * Builds the pre-fill payload for Facebook Marketplace, copies the
+         * description text to the clipboard, and opens Marketplace in a new
+         * tab. In create mode the wizard URL is opened; in edit mode the
+         * existing item page is opened so the user can use Facebook's own
+         * edit flow. Photos are handled separately by handleFacebookPhotos.
+         */
+
+        if (!formData.id) return;
+        setFacebookWorking(true);
+        try {
+            const result = await buildFacebookListingPayloadAction(formData.id);
+            if (!result.success || !result.payload) {
+                setSnackbar({ open: true, message: result.error || "Failed to prepare Facebook listing", severity: "error" });
+                return;
+            }
+
+            // copy the title + description to the clipboard so the user can
+            // paste it into Facebook's description field in one keystroke
+            try {
+                await navigator.clipboard.writeText(result.payload.copyText);
+            } catch (err) {
+                console.warn("Clipboard write failed:", err);
+                setSnackbar({ open: true, message: "Could not copy text — please copy it manually after opening Facebook.", severity: "error" });
+            }
+
+            // open marketplace in a new tab (create wizard or existing item)
+            window.open(result.payload.marketplaceUrl, "_blank", "noopener,noreferrer");
+
+            const actionLabel = result.payload.mode === "edit" ? "Edit" : "New listing";
+            setSnackbar({
+                open: true,
+                message: `Description copied to clipboard. Opened Facebook Marketplace (${actionLabel}). Remember to download photos and paste the text into the description field.`,
+                severity: "success",
+            });
+        } catch (err) {
+            setSnackbar({ open: true, message: err instanceof Error ? err.message : "Facebook assist failed", severity: "error" });
+        } finally {
+            setFacebookWorking(false);
+        }
+    };
+
+    // HANDLE FACEBOOK PHOTOS
+    const handleFacebookPhotos = () => {
+        /**
+         * Triggers a browser download of every photo attached to the resale
+         * listing, zipped server-side. When updating an existing listing the
+         * user has to delete the current photos on Facebook manually before
+         * dragging the new ZIP contents in, because Marketplace appends
+         * uploads instead of replacing them.
+         */
+
+        if (!formData.id || imageList.length === 0) return;
+
+        // use a plain anchor click so the browser handles the streamed
+        // response's Content-Disposition header and saves the ZIP to disk
+        const a = document.createElement("a");
+        a.href = `/api/auto-ads/resales/${formData.id}/photos.zip`;
+        a.rel = "noopener";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+    };
+
+    // HANDLE SAVE FACEBOOK URL
+    const handleSaveFacebookUrl = async () => {
+        /**
+         * Persists the Facebook Marketplace URL the user pasted back after
+         * publishing the listing manually. An empty value clears the stored
+         * URL so future assist clicks go back into create mode.
+         */
+
+        if (!formData.id) return;
+        setFacebookUrlSaving(true);
+        try {
+            const trimmed = facebookUrlInput.trim();
+            const toSave = trimmed.length > 0 ? trimmed : null;
+            const result = await saveResaleFacebookUrl(formData.id, toSave);
+            if (result.success) {
+                setFormData((prev) => ({ ...prev, facebookUrl: toSave }));
+                setSnackbar({
+                    open: true,
+                    message: toSave ? "Facebook URL saved" : "Facebook URL cleared",
+                    severity: "success",
+                });
+            } else {
+                setSnackbar({ open: true, message: result.error || "Failed to save Facebook URL", severity: "error" });
+            }
+        } catch (err) {
+            setSnackbar({ open: true, message: err instanceof Error ? err.message : "Failed to save Facebook URL", severity: "error" });
+        } finally {
+            setFacebookUrlSaving(false);
+        }
+    };
+
+    const facebookAssistDisabled =
+        !formData.id ||
+        !formData.shortDescription?.trim() ||
+        facebookWorking;
+
+    const facebookPhotosDisabled =
+        !formData.id ||
+        imageList.length === 0;
+
+    const facebookUrlDirty = (facebookUrlInput.trim() || null) !== (formData.facebookUrl ?? null);
 
     // HANDLE DELETE IMAGE
     const handleDeleteImage = async (imageId: number) => {
@@ -989,9 +1139,21 @@ export default function ResaleListingEditor({
                     >
                         {ebayCreating ? "Working…" : formData.eBayUrl ? "Update" : "Create"}
                     </Button>
+                    {formData.eBayUrl && (
+                        <Button
+                            size="small"
+                            variant="outlined"
+                            color="error"
+                            disabled={ebayCancelling}
+                            onClick={handleEbayCancel}
+                            startIcon={ebayCancelling ? <CircularProgress size={14} /> : undefined}
+                        >
+                            {ebayCancelling ? "Cancelling…" : "Cancel"}
+                        </Button>
+                    )}
                 </Box>
 
-                <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
                     <Typography variant="body2" sx={{ minWidth: 70 }}>Facebook</Typography>
                     {formData.facebookUrl && (
                         <Typography
@@ -1005,8 +1167,43 @@ export default function ResaleListingEditor({
                             View listing <OpenInNewIcon sx={{ fontSize: 14 }} />
                         </Typography>
                     )}
-                    <Button size="small" variant="outlined">
-                        {formData.facebookUrl ? "Update" : "Create"}
+                    <Button
+                        size="small"
+                        variant="outlined"
+                        disabled={facebookAssistDisabled}
+                        onClick={handleFacebookAssist}
+                        startIcon={facebookWorking ? <CircularProgress size={14} /> : undefined}
+                    >
+                        {facebookWorking ? "Working…" : formData.facebookUrl ? "Update" : "Create"}
+                    </Button>
+                    <Button
+                        size="small"
+                        variant="text"
+                        disabled={facebookPhotosDisabled}
+                        onClick={handleFacebookPhotos}
+                        startIcon={<DownloadIcon fontSize="small" />}
+                    >
+                        Download photos
+                    </Button>
+                </Box>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1, pl: { xs: 0, sm: "78px" }, flexWrap: "wrap" }}>
+                    <TextField
+                        label="Facebook URL"
+                        size="small"
+                        placeholder="https://www.facebook.com/marketplace/item/…"
+                        value={facebookUrlInput}
+                        onChange={(e) => setFacebookUrlInput(e.target.value)}
+                        sx={{ minWidth: 280, maxWidth: 520, flex: "1 1 280px" }}
+                        disabled={!formData.id || facebookUrlSaving}
+                    />
+                    <Button
+                        size="small"
+                        variant="outlined"
+                        onClick={handleSaveFacebookUrl}
+                        disabled={!formData.id || !facebookUrlDirty || facebookUrlSaving}
+                        startIcon={facebookUrlSaving ? <CircularProgress size={14} /> : <SaveIcon fontSize="small" />}
+                    >
+                        {facebookUrlSaving ? "Saving…" : "Save URL"}
                     </Button>
                 </Box>
             </Box>
@@ -1097,20 +1294,33 @@ export default function ResaleListingEditor({
                 </Typography>
             )}
 
-            <Snackbar
-                open={snackbar.open}
-                autoHideDuration={4000}
-                onClose={() => setSnackbar((prev) => ({ ...prev, open: false }))}
-                anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+            <Box
+                sx={{
+                    position: "fixed",
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    px: { xs: 1, sm: 2 },
+                    pb: { xs: 1, sm: 2 },
+                    zIndex: (theme) => theme.zIndex.snackbar,
+                    pointerEvents: "none",
+                }}
             >
-                <Alert
-                    onClose={() => setSnackbar((prev) => ({ ...prev, open: false }))}
-                    severity={snackbar.severity}
-                    variant="filled"
-                >
-                    {snackbar.message}
-                </Alert>
-            </Snackbar>
+                <Collapse in={snackbar.open} unmountOnExit timeout="auto">
+                    <Alert
+                        onClose={() => setSnackbar((prev) => ({ ...prev, open: false }))}
+                        severity={snackbar.severity}
+                        variant="filled"
+                        sx={{
+                            whiteSpace: "pre-line",
+                            width: "100%",
+                            pointerEvents: "auto",
+                        }}
+                    >
+                        {snackbar.message}
+                    </Alert>
+                </Collapse>
+            </Box>
         </Box>
     );
 }

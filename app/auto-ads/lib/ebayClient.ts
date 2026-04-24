@@ -9,6 +9,12 @@ type EbayMarketplaceId = (typeof eBayApi.MarketplaceId)[keyof typeof eBayApi.Mar
  * Union of supported REST marketplace ids from the eBay client enum.
  */
 
+// EBAY SITE ID TYPE
+type EbaySiteId = (typeof eBayApi.SiteId)[keyof typeof eBayApi.SiteId];
+/**
+ * Union of supported traditional API site ids used by Trading calls.
+ */
+
 // EBAY SELL SCOPES
 const EBAY_SELL_SCOPES = [
     "https://api.ebay.com/oauth/api_scope",
@@ -46,7 +52,7 @@ async function getEbayRefreshTokenFromIceAiDb(): Promise<string | null> {
 }
 
 // EBAY USE SANDBOX
-function ebayUseSandbox(): boolean {
+export function ebayUseSandbox(): boolean {
     /**
      * Matches ice_ai_api._ebay_oauth_endpoints: sandbox when API root URL contains
      * 'sandbox' or AUTO_ADS_EBAY_SANDBOX is truthy.
@@ -67,6 +73,19 @@ async function resolveEbayRefreshToken(): Promise<string | null> {
     const fromEnv = process.env.AUTO_ADS_EBAY_REFRESH_TOKEN?.trim();
     if (fromEnv) return fromEnv;
     return getEbayRefreshTokenFromIceAiDb();
+}
+
+// SITE ID FOR MARKETPLACE
+function siteIdForMarketplace(marketplaceId: EbayMarketplaceId): EbaySiteId {
+    /**
+     * Maps a REST MarketplaceId to the traditional API SiteId used by
+     * Trading API calls (AddItem/ReviseItem/GetItem). This keeps request
+     * headers aligned with Currency/Country/Site fields in Trading payloads.
+     */
+
+    if (marketplaceId === eBayApi.MarketplaceId.EBAY_GB) return eBayApi.SiteId.EBAY_GB;
+    if (marketplaceId === eBayApi.MarketplaceId.EBAY_US) return eBayApi.SiteId.EBAY_US;
+    return eBayApi.SiteId.EBAY_GB;
 }
 
 // GET EBAY API CLIENT
@@ -97,6 +116,7 @@ export async function getEbayApiClient(): Promise<eBayApi> {
         marketplaceId === eBayApi.MarketplaceId.EBAY_GB
             ? eBayApi.Locale.en_GB
             : eBayApi.Locale.en_US;
+    const siteId = siteIdForMarketplace(marketplaceId);
 
     const ebay = new eBayApi({
         appId,
@@ -104,6 +124,7 @@ export async function getEbayApiClient(): Promise<eBayApi> {
         ...(devId ? {devId} : {}),
         sandbox: ebayUseSandbox(),
         marketplaceId,
+        siteId,
         contentLanguage,
         acceptLanguage: contentLanguage,
         scope: [...EBAY_SELL_SCOPES],

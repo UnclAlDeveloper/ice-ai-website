@@ -11,9 +11,10 @@ import {AWSAccess} from "@app/lib/AwsAccess";
 import {readNumberplateFromUrl, readNumberplateFromBuffer} from "@app/auto-ads/lib/numberplateReader";
 import {lookupVehicle} from "@app/auto-ads/lib/dvlaVehicleEnquiry";
 import {generateDescription, suggestSellingPrice} from "@app/auto-ads/lib/descriptionGenerator";
-import type {ResaleListingData} from "@app/auto-ads/resales/actions";
+import type {resaleListing} from "@app/auto-ads/resales/actions";
 import {getResaleListing, saveResaleListing} from "@app/auto-ads/resales/actions";
-import {createEbayListingSafe} from "@app/auto-ads/lib/ebayListing";
+import {cancelEbayListingSafe, createEbayListingSafe} from "@app/auto-ads/lib/ebayListing";
+import {buildFacebookPayload, type FacebookListingPayload} from "@app/auto-ads/lib/facebookListing";
 
 // FETCH LISTING IMAGES
 export async function fetchListingImages(
@@ -311,7 +312,7 @@ export async function copyProspectToResale(prospectListingId: number): Promise<{
                 revenueWeight: prospect.revenueWeight,
                 adsPrice: null,
                 ebayCategoryId: null,
-                eBayUrl: "",
+                eBayUrl: null,
                 facebookUrl: "",
             })
             .returning({id: resaleListings.id});
@@ -538,12 +539,15 @@ export async function createEbayListingAction(listingId: number): Promise<{
         const msg = ebayResult.error || "eBay request failed";
         const hint =
             /token|refresh|401|403/i.test(msg) && !/renew/i.test(msg)
-                ? " Check AUTO_ADS_EBAY_REFRESH_TOKEN and OAuth scopes if this persists."
+                ? "Check AUTO_ADS_EBAY_REFRESH_TOKEN and OAuth scopes if this persists."
                 : "";
-        return {success: false, error: msg + hint};
+
+        // place the hint on its own line so multi-line eBay errors stay readable
+        const combined = hint ? `${msg}\n${hint}` : msg;
+        return {success: false, error: combined};
     }
 
-    const toSave: ResaleListingData = {
+    const toSave: resaleListing = {
         ...listing,
         eBayUrl: ebayResult.ebayUrl,
         ebayItemId: ebayResult.ebayItemId ?? listing.ebayItemId,
@@ -559,9 +563,141 @@ export async function createEbayListingAction(listingId: number): Promise<{
     return {success: true, ebayUrl: ebayResult.ebayUrl};
 }
 
+// CANCEL EBAY LISTING ACTION
+export async function cancelEbayListingAction(listingId: number): Promise<{
+    success: boolean;
+    error?: string;
+}> {
+    /**
+     * Cancels a resale listing on eBay using the listing id extracted from the
+     * stored eBay URL, then clears eBayUrl and ebayItemId on the local row.
+     */
+
+    const session = await getServerSessionFromCookies();
+    if (!session) {
+        return {success: false, error: "Not authenticated"};
+    }
+
+    const userTier = getUserTier(session.user.groups);
+    if (!compareTiers(userTier, "AdvancedTier")) {
+        return {success: false, error: "Advanced tier or higher required to cancel on eBay"};
+    }
+
+    const loaded = await getResaleListing(listingId);
+    if (!loaded.success || !loaded.listing) {
+        return {success: false, error: loaded.error || "Listing not found"};
+    }
+
+    const listing = loaded.listing;
+    if (!listing.eBayUrl?.trim()) {
+        return {success: false, error: "No eBay URL is stored for this listing."};
+    }
+
+    const ebayResult = await cancelEbayListingSafe(listing);
+    if (!ebayResult.success) {
+        const msg = ebayResult.error || "eBay cancellation failed";
+        const hint =
+            /token|refresh|401|403/i.test(msg) && !/renew/i.test(msg)
+                ? "Check AUTO_ADS_EBAY_REFRESH_TOKEN and OAuth scopes if this persists."
+                : "";
+        const combined = hint ? `${msg}\n${hint}` : msg;
+        return {success: false, error: combined};
+    }
+
+    const toSave: resaleListing = {
+        ...listing,
+        eBayUrl: null,
+        ebayItemId: null,
+    };
+    const saved = await saveResaleListing(toSave);
+    if (!saved.success) {
+        return {
+            success: false,
+            error: saved.error || "Listing cancelled on eBay but failed to clear local URL.",
+        };
+    }
+
+    return {success: true};
+}
+
+// BUILD FACEBOOK LISTING PAYLOAD ACTION
+export async function buildFacebookListingPayloadAction(listingId: number): Promise<{
+    success: boolean;
+    payload?: FacebookListingPayload;
+    error?: string;
+}> {
+    /**
+     * Builds the pre-fill payload the client uses to assist a Facebook
+     * Marketplace post: a formatted title and description for the clipboard,
+     * plus the correct target URL (the create wizard, or the existing item
+     * page for updates). No external API calls and no photos are involved;
+     * photos are handled by the dedicated ZIP download route so edits that
+     * only change description or price do not trigger an image fetch.
+     */
+
+    const session = await getServerSessionFromCookies();
+    if (!session) {
+        return {success: false, error: "Not authenticated"};
+    }
+
+    const loaded = await getResaleListing(listingId);
+    if (!loaded.success || !loaded.listing) {
+        return {success: false, error: loaded.error || "Listing not found"};
+    }
+
+    try {
+        const payload = buildFacebookPayload(loaded.listing);
+        return {success: true, payload};
+    } catch (err) {
+        console.error("Failed to build Facebook listing payload:", err);
+        return {success: false, error: err instanceof Error ? err.message : String(err)};
+    }
+}
+
+// SAVE RESALE FACEBOOK URL
+export async function saveResaleFacebookUrl(listingId: number, url: string | null): Promise<{
+    success: boolean;
+    error?: string;
+}> {
+    /**
+     * Persists the Facebook Marketplace listing URL on the resale row after
+     * the user has published (or cleared) the listing manually. Accepts
+     * null or an empty string to clear the stored URL when the Marketplace
+     * listing has been removed or the vehicle has been sold.
+     */
+
+    const session = await getServerSessionFromCookies();
+    if (!session) {
+        return {success: false, error: "Not authenticated"};
+    }
+
+    const loaded = await getResaleListing(listingId);
+    if (!loaded.success || !loaded.listing) {
+        return {success: false, error: loaded.error || "Listing not found"};
+    }
+
+    // normalise whitespace and empty strings to null so the column is
+    // cleanly cleared when the user removes the URL
+    const normalised = url?.trim() ? url.trim() : null;
+
+    const toSave: resaleListing = {
+        ...loaded.listing,
+        facebookUrl: normalised,
+    };
+    const saved = await saveResaleListing(toSave);
+    if (!saved.success) {
+        return {
+            success: false,
+            error: saved.error || "Failed to save Facebook URL.",
+        };
+    }
+
+    return {success: true};
+}
+
 // GENERATE RESALE DESCRIPTION
 export async function generateResaleDescription(
-    formData: ResaleListingData,
+    formData: resaleListing,
 ): Promise<{success: boolean; description?: string; specsAndFeatures?: string | null; error?: string}> {
     /**
      * Fetches all images for the resale listing (if it has been saved), then
@@ -633,7 +769,7 @@ export async function generateResaleDescription(
 
 // GENERATE RESALE SELL PRICE
 export async function generateResaleSellPrice(
-    formData: ResaleListingData,
+    formData: resaleListing,
 ): Promise<{success: boolean; low?: number; high?: number; error?: string}> {
     /**
      * Fetches all images for the resale listing (if it has been saved), then

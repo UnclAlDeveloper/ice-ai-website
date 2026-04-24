@@ -19,7 +19,7 @@ import {
 import RemoveIcon from "@mui/icons-material/Remove";
 import {red} from "@mui/material/colors";
 import {getResaleListing, getResaleListings} from "./actions";
-import type {ResaleListingData} from "./actions";
+import type {resaleListing} from "./actions";
 import {deleteResaleListing} from "../components/actions";
 import ResaleListingEditor from "../components/ResaleListingEditor";
 
@@ -43,7 +43,7 @@ export default function ResalesClient({existingListings, lookupMap, ebayCategori
 
     const [listings, setListings] = useState(existingListings);
     const [selectedId, setSelectedId] = useState<number | "">("");
-    const [editorData, setEditorData] = useState<ResaleListingData | null>(null);
+    const [editorData, setEditorData] = useState<resaleListing | null>(null);
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
     const [deleting, setDeleting] = useState(false);
 
@@ -63,7 +63,7 @@ export default function ResalesClient({existingListings, lookupMap, ebayCategori
     }, []);
 
     // HANDLE SAVED
-    const handleSaved = useCallback(async (data: ResaleListingData) => {
+    const handleSaved = useCallback(async (data: resaleListing) => {
         /**
          * Called by the editor after a successful save. Refreshes the listings
          * dropdown to pick up any changes to the short description or registration.
