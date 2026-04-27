@@ -1,11 +1,14 @@
 import eBayApi from "ebay-api";
-import type {resaleListing} from "@app/auto-ads/resales/actions";
 import {ebayUseSandbox, getEbayApiClient} from "@app/auto-ads/lib/ebayClient";
 import {
     createOrReviseClassifiedAd,
     formatTradingError,
     isVehicleCategory,
 } from "@app/auto-ads/lib/ebayTrading";
+import {
+    listingSku as buildListingSku,
+    type PublishableListing,
+} from "@app/auto-ads/lib/listingForPublish";
 
 // LISTING IMAGE ROW
 export type ListingImageRow = {id: number; url: string; isPrimary: boolean | null};
@@ -43,13 +46,16 @@ function truncateTitle(title: string): string {
 // SPECS TO FEATURE ASPECTS
 function specsToFeatureLines(specsAndFeatures: string | null): string[] {
     /**
-     * Splits multiline specs & features into non-empty lines for the Features aspect.
+     * Splits multiline specs & features into non-empty lines for the Features
+     * aspect. Any leading markdown bullet marker ("- ", "* ", or "• ") is
+     * stripped because eBay joins multi-valued aspects with commas and the
+     * bullet glyphs would otherwise show up inline on the item page.
      */
 
     if (!specsAndFeatures?.trim()) return [];
     return specsAndFeatures
         .split(/\r?\n/)
-        .map((line) => line.trim())
+        .map((line) => line.trim().replace(/^(?:[-*•])\s+/, "").trim())
         .filter(Boolean);
 }
 
@@ -77,29 +83,45 @@ function addAspect(aspects: Record<string, string[]>, name: string, value: strin
 }
 
 // BUILD ASPECTS
-function buildAspects(listing: resaleListing): Record<string, string[]> {
+function buildAspects(listing: PublishableListing): Record<string, string[]> {
     /**
-     * Maps resale vehicle fields to eBay product aspects (item specifics).
+     * Maps a publishable listing's vehicle aspects (when present) to eBay
+     * product aspects (item specifics). When the listing's `vehicle` field
+     * is undefined we instead emit a small set of placeholder aspects
+     * ("Brand=Unbranded", "MPN=Does Not Apply") so that publishOffer does
+     * not reject the listing for having zero aspects — eBay's REST
+     * Inventory API rejects most publishes with errorId 25713 when the
+     * inventory item carries no aspects at all.
      */
 
     const aspects: Record<string, string[]> = {};
 
-    addAspect(aspects, "Year", listing.year);
-    if (listing.mileage != null) {
-        const unit = listing.mileageUnit?.trim() || "miles";
-        aspects.Mileage = [`${listing.mileage} ${unit}`];
+    const vehicle = listing.vehicle;
+    if (vehicle) {
+        addAspect(aspects, "Year", vehicle.year);
+        // ebay's mileage aspect must be numeric only; the unit is implied
+        // by the marketplace (miles on uk, km on most eu sites) so we never
+        // append a unit here even when one is set
+        addAspect(aspects, "Mileage", vehicle.mileage);
+        addAspect(aspects, "Fuel Type", vehicle.fuelType);
+        addAspect(aspects, "Transmission", vehicle.gearboxType);
+        addAspect(aspects, "Colour", vehicle.colour);
+        addAspect(aspects, "Body Type", vehicle.bodyType);
+        addAspect(aspects, "Engine Size", vehicle.engineSize);
+        addAspect(aspects, "Seats", vehicle.seats);
+        addAspect(aspects, "Previous owners", vehicle.numberOfOwners);
+        addAspect(aspects, "Vehicle Registration Mark", vehicle.registration);
+        addAspect(aspects, "MOT Expiry Date", vehicle.motExpiry);
+        addAspect(aspects, "MOT status", vehicle.motStatus);
+        addAspect(aspects, "Emission class", vehicle.emissionClass);
+    } else {
+        // baseline placeholder aspects for non-vehicle (sale item) listings.
+        // ebay treats "Unbranded" and "Does Not Apply" as legitimate values
+        // across most consumer categories and prefers them over empty
+        // aspect objects, which trigger error 25713 at publish time
+        addAspect(aspects, "Brand", "Unbranded");
+        addAspect(aspects, "MPN", "Does Not Apply");
     }
-    addAspect(aspects, "Fuel Type", listing.fuelType);
-    addAspect(aspects, "Transmission", listing.gearboxType);
-    addAspect(aspects, "Colour", listing.colour);
-    addAspect(aspects, "Body Type", listing.bodyType);
-    addAspect(aspects, "Engine Size", listing.engineSize);
-    addAspect(aspects, "Seats", listing.seats);
-    addAspect(aspects, "Previous owners", listing.numberOfOwners);
-    addAspect(aspects, "Vehicle Registration Mark", listing.registration);
-    addAspect(aspects, "MOT Expiry Date", listing.motExpiry);
-    addAspect(aspects, "MOT status", listing.motStatus);
-    addAspect(aspects, "Emission class", listing.emissionClass);
 
     const features = specsToFeatureLines(listing.specsAndFeatures);
     if (features.length > 0) {
@@ -109,26 +131,17 @@ function buildAspects(listing: resaleListing): Record<string, string[]> {
     return aspects;
 }
 
-// RESALE SKU
-export function resaleListingSku(listingId: number): string {
-    /**
-     * Stable SKU for the resale listing used across inventory and offer calls.
-     */
-
-    return `resale-${listingId}`;
-}
-
 // BUILD INVENTORY ITEM BODY
 export function buildInventoryItemBody(
-    listing: resaleListing,
+    listing: PublishableListing,
     images: ListingImageRow[],
 ): Record<string, unknown> {
     /**
-     * Produces the JSON body for createOrReplaceInventoryItem from resale data and images.
+     * Produces the JSON body for createOrReplaceInventoryItem from the
+     * publishable listing and its images.
      */
 
-    const description =
-        listing.fullDescription?.trim() || listing.shortDescription || "";
+    const description = listing.body?.trim() || listing.title || "";
 
     const imageUrls = sortImageUrls(images);
     const aspects = buildAspects(listing);
@@ -138,10 +151,19 @@ export function buildInventoryItemBody(
         throw new Error("AUTO_ADS_EBAY_MERCHANT_LOCATION_KEY is not set.");
     }
 
+    // declare BOTH ship-to-location and pickup-at-location availability so
+    // the inventory item is publishable under any fulfillment policy: the
+    // sale-items flow is most often used with large/heavy items where the
+    // configured fulfillment policy is local-pickup-only, and ebay rejects
+    // publishOffer with a fieldless 25713 ("This Offer is not available")
+    // when a LOCAL_PICKUP policy is paired with an inventory item that has
+    // no pickupAtLocationAvailability entry. fulfillment policies that
+    // support shipping simply use shipToLocationAvailability and ignore
+    // the pickup block, so this is safe across all policy types.
     return {
         condition: "USED_GOOD",
         product: {
-            title: truncateTitle(listing.shortDescription),
+            title: truncateTitle(listing.title),
             description,
             imageUrls,
             aspects,
@@ -156,12 +178,19 @@ export function buildInventoryItemBody(
                     },
                 ],
             },
+            pickupAtLocationAvailability: [
+                {
+                    merchantLocationKey,
+                    quantity: 1,
+                    availabilityType: "IN_STOCK",
+                },
+            ],
         },
     };
 }
 
 // BUILD OFFER CREATE BODY
-function buildOfferCreateBody(listing: resaleListing, sku: string): Record<string, unknown> {
+function buildOfferCreateBody(listing: PublishableListing, sku: string): Record<string, unknown> {
     /**
      * Builds the payload for createOffer including policies, price, and category.
      */
@@ -213,7 +242,7 @@ function buildOfferCreateBody(listing: resaleListing, sku: string): Record<strin
 }
 
 // BUILD OFFER UPDATE BODY
-function buildOfferUpdateBody(listing: resaleListing): Record<string, unknown> {
+function buildOfferUpdateBody(listing: PublishableListing): Record<string, unknown> {
     /**
      * Builds the payload for updateOffer (fields allowed without sku/marketplaceId).
      */
@@ -279,8 +308,11 @@ function formatEbayError(err: unknown): string {
     /**
      * Extracts a readable message from an eBay REST API or axios error,
      * returning every reported error on its own line (with error id,
-     * category and any parameter hints) so the caller can surface the
-     * full set of issues rather than just the first one.
+     * category, parameter hints and inputRefIds) so the caller can
+     * surface the full set of issues rather than just the first one.
+     * inputRefIds are particularly useful for diagnosis because eBay
+     * uses them to point at the JSON path of the offending request
+     * field (e.g. "$.product.aspects.Brand").
      */
 
     if (!(err instanceof Error)) return String(err);
@@ -292,6 +324,8 @@ function formatEbayError(err: unknown): string {
         category?: string;
         message?: string;
         longMessage?: string;
+        inputRefIds?: string[];
+        outputRefIds?: string[];
         parameters?: EbayRestParameter[];
     };
     const anyErr = err as Error & {meta?: {res?: {data?: unknown}}};
@@ -312,14 +346,27 @@ function formatEbayError(err: unknown): string {
                     (entry.errorId !== undefined ? `eBay error ${entry.errorId}` : "");
                 if (!prefix && !body) continue;
 
+                const hints: string[] = [];
+
                 // include any parameter hints (e.g. which field caused the issue)
-                const paramText = Array.isArray(entry.parameters)
-                    ? entry.parameters
+                if (Array.isArray(entry.parameters) && entry.parameters.length > 0) {
+                    const paramText = entry.parameters
                         .map((p) => (p?.name ? `${p.name}=${p.value ?? ""}` : String(p?.value ?? "")))
                         .filter(Boolean)
-                        .join(", ")
-                    : "";
-                const suffix = paramText ? ` (${paramText})` : "";
+                        .join(", ");
+                    if (paramText) hints.push(paramText);
+                }
+
+                // surface inputRefIds: json paths into the request body that
+                // ebay flags as the source of the error (e.g. "$.condition"
+                // when the condition is invalid for the chosen category).
+                // for error 25713 these are usually the only diagnostic clue
+                // the api gives us
+                if (Array.isArray(entry.inputRefIds) && entry.inputRefIds.length > 0) {
+                    hints.push(`fields: ${entry.inputRefIds.join(", ")}`);
+                }
+
+                const suffix = hints.length > 0 ? ` (${hints.join("; ")})` : "";
 
                 lines.push(`${prefix}${body}${suffix}`.trim());
             }
@@ -353,16 +400,16 @@ function extractListingIdFromEbayUrl(ebayUrl: string | null | undefined): string
 
 // CANCEL EBAY LISTING INVENTORY
 async function cancelEbayListingInventory(
-    listing: resaleListing,
+    listing: PublishableListing,
     listingIdToCancel: string,
 ): Promise<void> {
     /**
      * Cancels a published non-vehicle listing by finding the corresponding
-     * offer for the resale SKU and withdrawing that offer.
+     * offer for the listing's SKU and withdrawing that offer.
      */
 
     const ebay = await getEbayApiClient();
-    const sku = resaleListingSku(listing.id!);
+    const sku = buildListingSku(listing);
     const marketplaceId =
         process.env.AUTO_ADS_EBAY_MARKETPLACE_ID?.trim() || eBayApi.MarketplaceId.EBAY_GB;
     type OfferRow = {
@@ -402,7 +449,7 @@ async function cancelEbayListingTrading(listingIdToCancel: string): Promise<void
 
 // CANCEL EBAY LISTING
 export async function cancelEbayListing(
-    listing: resaleListing,
+    listing: PublishableListing,
 ): Promise<void> {
     /**
      * Cancels the current eBay listing by extracting its item/listing id from
@@ -430,7 +477,7 @@ export async function cancelEbayListing(
 
 // CANCEL EBAY LISTING SAFE
 export async function cancelEbayListingSafe(
-    listing: resaleListing,
+    listing: PublishableListing,
 ): Promise<{success: true} | {success: false; error: string}> {
     /**
      * Wraps cancelEbayListing and returns a structured result suitable for
@@ -455,23 +502,41 @@ export async function cancelEbayListingSafe(
 }
 
 
+// DEBUG INVENTORY PUBLISH
+function debugInventoryPublish(): boolean {
+    /**
+     * Returns true when AUTO_ADS_EBAY_DEBUG_PUBLISH is set to a truthy value,
+     * which gates the verbose request/response logging used to diagnose
+     * publish failures (notably the fieldless 25713 errors eBay returns
+     * when an inventory item or offer is structurally rejected without
+     * pointing at a specific field).
+     */
+
+    const flag = (process.env.AUTO_ADS_EBAY_DEBUG_PUBLISH || "").toLowerCase();
+    return flag === "1" || flag === "true" || flag === "yes";
+}
+
 // CREATE EBAY LISTING INVENTORY
 async function createEbayListingInventory(
-    listing: resaleListing,
+    listing: PublishableListing,
     images: ListingImageRow[],
 ): Promise<EbayListingResult> {
     /**
-     * Publishes a non-vehicle resale via the REST Sell Inventory API. Creates
+     * Publishes a non-vehicle listing via the REST Sell Inventory API. Creates
      * or replaces the inventory item, creates or updates the offer, then
      * publishes it and returns the public listing URL.
      */
 
-    const sku = resaleListingSku(listing.id!);
+    const sku = buildListingSku(listing);
     const ebay = await getEbayApiClient();
     const marketplaceId =
         process.env.AUTO_ADS_EBAY_MARKETPLACE_ID?.trim() || eBayApi.MarketplaceId.EBAY_GB;
 
     const inventoryBody = buildInventoryItemBody(listing, images);
+    if (debugInventoryPublish()) {
+        console.log(`[ebay-debug] sku=${sku} marketplaceId=${marketplaceId}`);
+        console.log("[ebay-debug] inventoryBody:", JSON.stringify(inventoryBody, null, 2));
+    }
     await ebay.sell.inventory.createOrReplaceInventoryItem(sku, inventoryBody);
 
     const offersResponse = await ebay.sell.inventory.getOffers({sku, marketplaceId});
@@ -484,13 +549,24 @@ async function createEbayListingInventory(
     const offers = (offersResponse?.offers ?? []) as OfferRow[];
 
     const existing = offers.find((o) => o.sku === sku);
+    if (debugInventoryPublish()) {
+        console.log(
+            `[ebay-debug] existing offer: ${existing ? `${existing.offerId} status=${existing.status}` : "<none>"}`,
+        );
+    }
 
     if (existing?.offerId) {
         const offerId = existing.offerId;
         const updateBody = buildOfferUpdateBody(listing);
+        if (debugInventoryPublish()) {
+            console.log("[ebay-debug] updateOffer body:", JSON.stringify(updateBody, null, 2));
+        }
         await ebay.sell.inventory.updateOffer(offerId, updateBody);
 
         if (existing.status !== "PUBLISHED") {
+            if (debugInventoryPublish()) {
+                console.log(`[ebay-debug] publishOffer offerId=${offerId}`);
+            }
             const published = await ebay.sell.inventory.publishOffer(offerId);
             const listingId = (published as {listingId?: string})?.listingId;
             if (!listingId) {
@@ -517,10 +593,17 @@ async function createEbayListingInventory(
     }
 
     const createBody = buildOfferCreateBody(listing, sku);
+    if (debugInventoryPublish()) {
+        console.log("[ebay-debug] createOffer body:", JSON.stringify(createBody, null, 2));
+    }
     const created = await ebay.sell.inventory.createOffer(createBody);
     const newOfferId = (created as {offerId?: string})?.offerId ?? "";
     if (!newOfferId) {
         throw new Error("eBay createOffer succeeded but no offer id was returned.");
+    }
+    if (debugInventoryPublish()) {
+        console.log(`[ebay-debug] createOffer returned offerId=${newOfferId}`);
+        console.log(`[ebay-debug] publishOffer offerId=${newOfferId}`);
     }
 
     const published = await ebay.sell.inventory.publishOffer(newOfferId);
@@ -538,16 +621,16 @@ async function createEbayListingInventory(
 
 // CREATE EBAY LISTING
 export async function createEbayListing(
-    listing: resaleListing,
+    listing: PublishableListing,
     images: ListingImageRow[],
 ): Promise<EbayListingResult> {
     /**
-     * Publishes a resale on eBay, dispatching automatically based on the eBay
-     * category: vehicle categories (UK Cars, Motorcycles & Vehicles tree and
-     * any overrides in AUTO_ADS_EBAY_VEHICLE_CATEGORY_IDS) are published as
-     * Classified Ads via the Trading API because the Inventory API rejects
-     * them; every other category continues to use the REST Sell Inventory
-     * API flow.
+     * Publishes a publishable listing on eBay, dispatching automatically
+     * based on the eBay category: vehicle categories (UK Cars, Motorcycles
+     * & Vehicles tree and any overrides in AUTO_ADS_EBAY_VEHICLE_CATEGORY_IDS)
+     * are published as Classified Ads via the Trading API because the
+     * Inventory API rejects them; every other category continues to use
+     * the REST Sell Inventory API flow.
      */
 
     if (!listing.id) {
@@ -565,7 +648,7 @@ export async function createEbayListing(
 
 // CREATE EBAY LISTING SAFE
 export async function createEbayListingSafe(
-    listing: resaleListing,
+    listing: PublishableListing,
     images: ListingImageRow[],
 ): Promise<
     | {success: true; ebayUrl: string; ebayItemId: string | null}

@@ -5,7 +5,7 @@ export const listingSource = aa.enum(
 	"listing_source",
 	['Autotrader', 'Car&Classic', 'eBay', 'Facebook', 'Gumtree', 'ManualEntry', 'OnlyVans']
 )
-export const listingTable = aa.enum("listing_table", ['Prospect', 'Resale'])
+export const listingTable = aa.enum("listing_table", ['Prospect', 'Resale', 'SaleItem'])
 export const prospectListingStatus = aa.enum(
 	"prospect_listing_status",
 	['New', 'Viewed', 'Not Interested', 'Interested', 'Bought', 'Sold']
@@ -14,6 +14,10 @@ export const resaleListingStatus = aa.enum(
 	"resale_listing_status",
 	['Bought', 'Sold']
 )
+export const saleListingStatus = aa.enum(
+	"sale_listing_status",
+	['Inventory', 'Sold']
+)
 
 export const lookups = aa.table("lookups", {
 	id: serial().primaryKey().notNull(),
@@ -21,6 +25,7 @@ export const lookups = aa.table("lookups", {
 	code: varchar().notNull(),
 	value: varchar(),
 	description: varchar(),
+	extra: varchar(),
 }, (table) => [
 	unique("lookups_type_code_unique").on(table.lookupType, table.code),
 	index("idx_lookups_type_code_unique").on(table.lookupType, table.code),
@@ -146,6 +151,24 @@ export const resaleListings = aa.table("resale_listings", {
 	aiSellPriceLow: integer("ai_sell_price_low"),
 	aiSellPriceHigh: integer("ai_sell_price_high"),
 	adsPrice: integer("ads_price"),
+	ebayCategoryId: varchar("ebay_category_id"),
+	ebayItemId: varchar("ebay_item_id"),
+	eBayUrl: varchar(),
+	facebookUrl: varchar(),
+});
+
+
+// SALE ITEMS
+export const saleItems = aa.table("sale_items", {
+	id: serial().primaryKey().notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }),
+	status: saleListingStatus().notNull(),
+	title: varchar().notNull(),
+	description: varchar(),
+	askingPrice: integer("asking_price"),
+	currencySymbol: char("currency_symbol", { length: 1 }),
+	location: varchar(),
 	ebayCategoryId: varchar("ebay_category_id"),
 	ebayItemId: varchar("ebay_item_id"),
 	eBayUrl: varchar(),

@@ -29,7 +29,12 @@
     "db:auto-ads:push": "drizzle-kit push --config=drizzle.auto-ads.config.ts",
     "db:auto-ads:migrate": "drizzle-kit migrate --config=drizzle.auto-ads.config.ts",
     "db:auto-ads:pull": "drizzle-kit pull --config=drizzle.auto-ads.config.ts",
-    "db:auto-ads:studio": "drizzle-kit studio --config=drizzle.auto-ads.config.ts"
+    "db:auto-ads:studio": "drizzle-kit studio --config=drizzle.auto-ads.config.ts",
+    "seed:ebay-categories": "tsx scripts/seedEbayCategories.ts",
+    "diagnose:ebay-setup": "tsx scripts/diagnoseEbaySetup.ts",
+    "fix:ebay-sale-policies": "tsx scripts/createEbaySaleItemPolicies.ts",
+    "fix:ebay-out-of-stock-control": "tsx scripts/optInOutOfStockControl.ts",
+    "verify:ebay-trading-sale-item": "tsx scripts/verifyEbayTradingFixedPriceForSaleItems.ts"
   },
   "dependencies": {
     "@aws-sdk/client-cognito-identity-provider": "^3.936.0",

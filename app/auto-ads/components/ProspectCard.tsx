@@ -1,7 +1,8 @@
 "use client";
 
 import React, {useState, useRef, useEffect, useCallback} from "react";
-import {Card, CardContent, Typography, Link, Box, useTheme, useMediaQuery, Collapse, IconButton, Table, TableBody, TableCell, TableRow, Rating, TextField, Button, InputAdornment, Dialog, DialogContent, DialogTitle, CircularProgress} from "@mui/material";
+import {Card, CardContent, Typography, Link, Box, useTheme, useMediaQuery, Collapse, IconButton, Table, TableBody, TableCell, TableRow, Rating, Button, Dialog, DialogContent, DialogTitle, CircularProgress} from "@mui/material";
+import CurrencyTextField from "./CurrencyTextField";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import ExpandLessIcon from "@mui/icons-material/ExpandLess";
 import VolumeUpIcon from "@mui/icons-material/VolumeUp";
@@ -126,8 +127,8 @@ export default function ProspectCard({listing, imageUrl, showCopyToResale}: Pros
     }, [playingText]);
     const {data: session} = useSession();
     const [interestLevel, setInterestLevel] = useState<number | null>(listing.interestLevel);
-    const [adsEstBuyPrice, setAdsEstBuyPrice] = useState<string>(listing.adsEstBuyPrice?.toString() || '');
-    const [adsEstSellPrice, setAdsEstSellPrice] = useState<string>(listing.adsEstSellPrice?.toString() || '');
+    const [adsEstBuyPrice, setAdsEstBuyPrice] = useState<number | null>(listing.adsEstBuyPrice ?? null);
+    const [adsEstSellPrice, setAdsEstSellPrice] = useState<number | null>(listing.adsEstSellPrice ?? null);
     const [localStatus, setLocalStatus] = useState<string>(listing.status);
     const [saving, setSaving] = useState(false);
     const [copying, setCopying] = useState(false);
@@ -195,8 +196,8 @@ export default function ProspectCard({listing, imageUrl, showCopyToResale}: Pros
         if (interestLevel === null) return;
 
         if (interestLevel >= 4) {
-            if (!adsEstBuyPrice.trim() || isNaN(parseInt(adsEstBuyPrice))) return;
-            if (!adsEstSellPrice.trim() || isNaN(parseInt(adsEstSellPrice))) return;
+            if (adsEstBuyPrice == null) return;
+            if (adsEstSellPrice == null) return;
         }
 
         const newStatus = interestLevel >= 4 ? 'Interested' as const : 'Not Interested' as const;
@@ -207,8 +208,8 @@ export default function ProspectCard({listing, imageUrl, showCopyToResale}: Pros
                 listing.id,
                 interestLevel,
                 newStatus,
-                interestLevel >= 4 ? parseInt(adsEstBuyPrice) : null,
-                interestLevel >= 4 ? parseInt(adsEstSellPrice) : null,
+                interestLevel >= 4 ? adsEstBuyPrice : null,
+                interestLevel >= 4 ? adsEstSellPrice : null,
             );
             if (!result.success) {
                 console.error("Failed to save prospect interest:", result.error);
@@ -838,39 +839,25 @@ export default function ProspectCard({listing, imageUrl, showCopyToResale}: Pros
                         </Box>
                         {interestLevel !== null && interestLevel >= 4 && (
                             <>
-                                <TextField
+                                <CurrencyTextField
                                     label="Buy Price"
                                     placeholder="Estimated"
-                                    type="number"
                                     size="small"
                                     required
+                                    currencySymbol={listing.currencySymbol || '£'}
                                     value={adsEstBuyPrice}
-                                    onChange={(e) => setAdsEstBuyPrice(e.target.value)}
-                                    slotProps={{
-                                        input: {
-                                            startAdornment: (
-                                                <InputAdornment position="start">{listing.currencySymbol || '£'}</InputAdornment>
-                                            ),
-                                        },
-                                    }}
-                                    sx={{ width: 150 }}
+                                    onChange={(v) => setAdsEstBuyPrice(v)}
+                                    sx={{width: 150}}
                                 />
-                                <TextField
+                                <CurrencyTextField
                                     label="Sell Price"
                                     placeholder="Estimated"
-                                    type="number"
                                     size="small"
                                     required
+                                    currencySymbol={listing.currencySymbol || '£'}
                                     value={adsEstSellPrice}
-                                    onChange={(e) => setAdsEstSellPrice(e.target.value)}
-                                    slotProps={{
-                                        input: {
-                                            startAdornment: (
-                                                <InputAdornment position="start">{listing.currencySymbol || '£'}</InputAdornment>
-                                            ),
-                                        },
-                                    }}
-                                    sx={{ width: 150 }}
+                                    onChange={(v) => setAdsEstSellPrice(v)}
+                                    sx={{width: 150}}
                                 />
                             </>
                         )}

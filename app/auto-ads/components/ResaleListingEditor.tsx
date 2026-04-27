@@ -25,6 +25,7 @@ import SearchIcon from "@mui/icons-material/Search";
 import AutoFixHighIcon from "@mui/icons-material/AutoFixHigh";
 import OpenInNewIcon from "@mui/icons-material/OpenInNew";
 import DownloadIcon from "@mui/icons-material/Download";
+import CurrencyTextField from "./CurrencyTextField";
 import { saveResaleListing } from "../resales/actions";
 import type { resaleListing } from "../resales/actions";
 import { fetchListingImages, uploadListingImage, deleteListingImage, detectNumberplate, lookupRegistration, generateResaleDescription, generateResaleSellPrice, createEbayListingAction, cancelEbayListingAction, buildFacebookListingPayloadAction, saveResaleFacebookUrl } from "./actions";
@@ -1056,13 +1057,13 @@ export default function ResaleListingEditor({
             </Box>
             <Grid container spacing={2}>
                 <Grid size={fieldSize}>
-                    <TextField
+                    <CurrencyTextField
                         label="Ads Price"
                         size="small"
                         fullWidth
-                        type="number"
-                        value={formData.adsPrice ?? ""}
-                        onChange={(e) => setField("adsPrice", e.target.value ? parseInt(e.target.value, 10) : null)}
+                        currencySymbol="£"
+                        value={formData.adsPrice}
+                        onChange={(v) => setField("adsPrice", v)}
                     />
                 </Grid>
 
@@ -1079,13 +1080,13 @@ export default function ResaleListingEditor({
                 )}
 
                 <Grid size={fieldSize}>
-                    <TextField
+                    <CurrencyTextField
                         label="Asking Price"
                         size="small"
                         fullWidth
-                        type="number"
-                        value={formData.askingPrice ?? ""}
-                        onChange={(e) => setField("askingPrice", e.target.value ? parseInt(e.target.value, 10) : null)}
+                        currencySymbol="£"
+                        value={formData.askingPrice}
+                        onChange={(v) => setField("askingPrice", v)}
                     />
                 </Grid>
             </Grid>

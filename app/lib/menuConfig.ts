@@ -148,6 +148,15 @@ const menuItems: MenuItem[] = [
         componentType: 'server',
         appName: AppName.AutoAds,
     },
+    {
+        name: 'House Sales',
+        path: '/sale-items',
+        isPublic: false,
+        hideWhenDisabled: true,
+        requiredTier: 'BasicTier',
+        componentType: 'server',
+        appName: AppName.AutoAds,
+    },
 ];
 /* Contains all menu items for this project. */
 

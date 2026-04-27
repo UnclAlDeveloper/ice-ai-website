@@ -1,20 +1,35 @@
 import JSZip from "jszip";
 
-import type {resaleListing} from "@app/auto-ads/resales/actions";
+import type {PublishableListing} from "@app/auto-ads/lib/listingForPublish";
 
 // FACEBOOK TITLE MAX LENGTH
 const FACEBOOK_TITLE_MAX = 100;
 /**
- * Facebook Marketplace caps vehicle listing titles at 100 characters;
- * descriptions longer than the title are fine and go in the body.
+ * Facebook Marketplace caps listing titles at 100 characters; descriptions
+ * longer than the title are fine and go in the body.
  */
 
-// FACEBOOK MARKETPLACE CREATE URL
-const FACEBOOK_CREATE_URL = "https://www.facebook.com/marketplace/create/vehicle";
-/**
- * Desktop create-listing URL for a Marketplace vehicle. Used when the
- * resale has not yet been posted to Facebook.
- */
+// FACEBOOK CREATE VEHICLE URL
+const FACEBOOK_CREATE_VEHICLE_URL = "https://www.facebook.com/marketplace/create/vehicle";
+/** Desktop create-listing URL for a Marketplace vehicle listing. */
+
+// FACEBOOK CREATE ITEM URL
+const FACEBOOK_CREATE_ITEM_URL = "https://www.facebook.com/marketplace/create/item";
+/** Desktop create-listing URL for a generic Marketplace item listing. */
+
+// FACEBOOK CREATE URL FOR LISTING
+function facebookCreateUrl(listing: PublishableListing): string {
+    /**
+     * Picks the correct Marketplace create-listing URL for the given
+     * publishable listing. Vehicle (Resale) listings open the dedicated
+     * vehicle wizard; sale items open the generic item wizard since
+     * Facebook has no per-category create flow for non-vehicles.
+     */
+
+    return listing.listingTable === 'Resale'
+        ? FACEBOOK_CREATE_VEHICLE_URL
+        : FACEBOOK_CREATE_ITEM_URL;
+}
 
 
 // FACEBOOK LISTING PAYLOAD
@@ -79,46 +94,49 @@ export function extractFacebookItemId(facebookUrl: string | null | undefined): s
 
 
 // MARKETPLACE URL FOR MODE
-function marketplaceUrlForMode(facebookUrl: string | null | undefined): {
+function marketplaceUrlForMode(listing: PublishableListing): {
     url: string;
     mode: "create" | "edit";
 } {
     /**
-     * Picks the target Marketplace URL based on whether the resale already
-     * has a Facebook listing URL. Edit mode opens the item page so the user
-     * can click Facebook's own Edit button from there; create mode opens
-     * the new-vehicle-listing wizard.
+     * Picks the target Marketplace URL based on whether the listing already
+     * has a Facebook URL. Edit mode opens the item page so the user can
+     * click Facebook's own Edit button from there; create mode opens the
+     * appropriate create wizard for the listing's table.
      */
 
-    const itemId = extractFacebookItemId(facebookUrl);
+    const itemId = extractFacebookItemId(listing.facebookUrl);
     if (itemId) {
         return {
             url: `https://www.facebook.com/marketplace/item/${itemId}/`,
             mode: "edit",
         };
     }
-    return {url: FACEBOOK_CREATE_URL, mode: "create"};
+    return {url: facebookCreateUrl(listing), mode: "create"};
 }
 
 
 // BUILD DESCRIPTION BODY
-function buildDescriptionBody(listing: resaleListing): string {
+function buildDescriptionBody(listing: PublishableListing): string {
     /**
      * Composes the description body pasted into Facebook: the main
-     * description first, an optional MOT expiry line directly beneath it,
-     * and finally a bullet list of any specs & features. Other vehicle
-     * facts (year, mileage, price, etc.) are entered into Facebook's own
+     * description first, an optional MOT expiry line for vehicles, and
+     * finally a bullet list of any specs & features. Other vehicle facts
+     * (year, mileage, price, etc.) are entered into Facebook's own
      * structured fields so they deliberately do not appear in the prose.
+     * Sale items only contribute the body text plus the optional Features
+     * block since they have no specsAndFeatures and no vehicle aspects.
      */
 
     const parts: string[] = [];
 
-    // description block: main body with MOT appended on its own line when present
+    // description block: main body with mot appended on its own line for vehicles
     const descriptionLines: string[] = [];
-    const mainBody = listing.fullDescription?.trim() || listing.shortDescription?.trim();
+    const mainBody = listing.body?.trim() || listing.title?.trim();
     if (mainBody) descriptionLines.push(mainBody);
-    if (listing.motExpiry?.trim()) {
-        descriptionLines.push(`MOT expires: ${listing.motExpiry.trim()}`);
+    const motExpiry = listing.vehicle?.motExpiry?.trim();
+    if (motExpiry) {
+        descriptionLines.push(`MOT expires: ${motExpiry}`);
     }
     if (descriptionLines.length > 0) parts.push(descriptionLines.join("\n"));
 
@@ -133,19 +151,19 @@ function buildDescriptionBody(listing: resaleListing): string {
 
 
 // BUILD FACEBOOK PAYLOAD
-export function buildFacebookPayload(listing: resaleListing): FacebookListingPayload {
+export function buildFacebookPayload(listing: PublishableListing): FacebookListingPayload {
     /**
      * Produces the clipboard text, title, and target Marketplace URL for a
-     * resale listing. Pure: no database or image access, so it can be unit
-     * tested against a fixture row without any setup. The copyText includes
-     * the title on its own line followed by a blank line and the body so
-     * users can either paste the whole lot into the description field or
-     * split the first line into the title field.
+     * publishable listing. Pure: no database or image access, so it can be
+     * unit tested against a fixture row without any setup. The copyText
+     * includes the title on its own line followed by a blank line and the
+     * body so users can either paste the whole lot into the description
+     * field or split the first line into the title field.
      */
 
-    const title = truncateTitle(listing.shortDescription || listing.makeAndModel || "");
+    const title = truncateTitle(listing.title || "");
     const description = buildDescriptionBody(listing);
-    const {url: marketplaceUrl, mode} = marketplaceUrlForMode(listing.facebookUrl);
+    const {url: marketplaceUrl, mode} = marketplaceUrlForMode(listing);
 
     const copyText = description ? `${title}\n\n${description}` : title;
 

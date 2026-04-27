@@ -2,7 +2,7 @@
 
 import {randomBytes} from "crypto";
 import {getAutoAdsDb} from "@app/lib/autoAdsDb";
-import {prospectListings, resaleListings, images} from "@/drizzle/auto-ads/schema";
+import {prospectListings, resaleListings, saleItems, images} from "@/drizzle/auto-ads/schema";
 import {eq, and, asc} from "drizzle-orm";
 import {getServerSessionFromCookies} from "@app/lib/session";
 import {getUserTier, compareTiers} from "@app/lib/menuUtils";
@@ -15,10 +15,19 @@ import type {resaleListing} from "@app/auto-ads/resales/actions";
 import {getResaleListing, saveResaleListing} from "@app/auto-ads/resales/actions";
 import {cancelEbayListingSafe, createEbayListingSafe} from "@app/auto-ads/lib/ebayListing";
 import {buildFacebookPayload, type FacebookListingPayload} from "@app/auto-ads/lib/facebookListing";
+import {resaleToPublishable} from "@app/auto-ads/lib/listingForPublish";
+
+// LISTING TABLE
+type ListingTable = "Prospect" | "Resale" | "SaleItem";
+/**
+ * Union of every listing kind that owns images and per-row pages. Kept in
+ * one spot so server actions and the image table cast in step when a new
+ * listing kind is introduced.
+ */
 
 // FETCH LISTING IMAGES
 export async function fetchListingImages(
-    listingTable: "Prospect" | "Resale",
+    listingTable: ListingTable,
     listingId: number,
 ): Promise<{success: boolean; images?: {id: number; url: string; isPrimary: boolean | null}[]; error?: string}> {
     /**
@@ -146,7 +155,7 @@ export async function uploadListingImage(formData: FormData): Promise<{
                 .select({id: images.id})
                 .from(images)
                 .where(and(
-                    eq(images.listingTable, listingTableVal as "Prospect" | "Resale"),
+                    eq(images.listingTable, listingTableVal as ListingTable),
                     eq(images.listingId, listingId),
                 ))
                 .limit(1);
@@ -158,7 +167,7 @@ export async function uploadListingImage(formData: FormData): Promise<{
             .values({
                 url,
                 listingId,
-                listingTable: listingTableVal as "Prospect" | "Resale",
+                listingTable: listingTableVal as ListingTable,
                 createdAt: new Date().toISOString(),
                 isPrimary,
             })
@@ -166,6 +175,7 @@ export async function uploadListingImage(formData: FormData): Promise<{
 
         revalidatePath("/auto-ads/manual-entry");
         revalidatePath("/auto-ads/prospects");
+        revalidatePath("/auto-ads/sale-items");
         return {success: true, image: inserted};
     } catch (err) {
         console.error("Failed to upload listing image:", err);
@@ -427,9 +437,57 @@ export async function deleteListingImage(imageId: number): Promise<{
 
         revalidatePath("/auto-ads/manual-entry");
         revalidatePath("/auto-ads/prospects");
+        revalidatePath("/auto-ads/sale-items");
         return {success: true};
     } catch (err) {
         console.error("Failed to delete listing image:", err);
+        return {success: false, error: err instanceof Error ? err.message : String(err)};
+    }
+}
+
+// DELETE SALE ITEM
+export async function deleteSaleItem(itemId: number): Promise<{
+    success: boolean;
+    error?: string;
+}> {
+    /**
+     * Removes a sale item and all of its images. Mirrors deleteResaleListing:
+     * each image hosted in our S3 bucket is deleted from storage first, then
+     * the image rows and the sale item row are removed from the database.
+     */
+
+    const session = await getServerSessionFromCookies();
+    if (!session) {
+        return {success: false, error: "Not authenticated"};
+    }
+
+    try {
+        // fetch all images belonging to this sale item
+        const imageRows = await getAutoAdsDb()
+            .select({id: images.id})
+            .from(images)
+            .where(
+                and(
+                    eq(images.listingTable, "SaleItem"),
+                    eq(images.listingId, itemId),
+                )
+            );
+
+        // delete each image from s3 and the database
+        for (const img of imageRows) {
+            await deleteListingImage(img.id);
+        }
+
+        // delete the sale item row itself
+        await getAutoAdsDb()
+            .delete(saleItems)
+            .where(eq(saleItems.id, itemId));
+
+        revalidatePath("/auto-ads/sale-items");
+        revalidatePath("/auto-ads");
+        return {success: true};
+    } catch (err) {
+        console.error("Failed to delete sale item:", err);
         return {success: false, error: err instanceof Error ? err.message : String(err)};
     }
 }
@@ -534,7 +592,7 @@ export async function createEbayListingAction(listingId: number): Promise<{
         return {success: false, error: "Add at least one image before publishing on eBay."};
     }
 
-    const ebayResult = await createEbayListingSafe(listing, imgResult.images);
+    const ebayResult = await createEbayListingSafe(resaleToPublishable(listing), imgResult.images);
     if (!ebayResult.success) {
         const msg = ebayResult.error || "eBay request failed";
         const hint =
@@ -593,7 +651,7 @@ export async function cancelEbayListingAction(listingId: number): Promise<{
         return {success: false, error: "No eBay URL is stored for this listing."};
     }
 
-    const ebayResult = await cancelEbayListingSafe(listing);
+    const ebayResult = await cancelEbayListingSafe(resaleToPublishable(listing));
     if (!ebayResult.success) {
         const msg = ebayResult.error || "eBay cancellation failed";
         const hint =
@@ -646,7 +704,7 @@ export async function buildFacebookListingPayloadAction(listingId: number): Prom
     }
 
     try {
-        const payload = buildFacebookPayload(loaded.listing);
+        const payload = buildFacebookPayload(resaleToPublishable(loaded.listing));
         return {success: true, payload};
     } catch (err) {
         console.error("Failed to build Facebook listing payload:", err);

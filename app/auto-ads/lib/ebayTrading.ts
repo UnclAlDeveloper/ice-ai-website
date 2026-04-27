@@ -1,7 +1,7 @@
 import eBayApi from "ebay-api";
 import {and, eq} from "drizzle-orm";
-import type {resaleListing} from "@app/auto-ads/resales/actions";
 import {ebayUseSandbox, getEbayApiClient} from "@app/auto-ads/lib/ebayClient";
+import type {PublishableListing} from "@app/auto-ads/lib/listingForPublish";
 import {getAutoAdsDb} from "@app/lib/autoAdsDb";
 import {lookups} from "@/drizzle/auto-ads/schema";
 
@@ -24,26 +24,29 @@ export type ClassifiedAdResult = {ebayUrl: string; itemId: string};
 const EBAY_CATEGORY_LOOKUP_TYPE = "ebay_categories";
 /**
  * lookup_type value used to store eBay category options in the aa.lookups
- * table. The row's `description` column drives routing: rows whose
- * description equals 'vehicle' (case-insensitive) publish via the Trading
- * API as Classified Ads; everything else publishes through the REST Sell
- * Inventory API.
+ * table. The row's `extra` column drives routing: when it contains
+ * 'vehicle' (in a comma-delimited list, case-insensitive) the listing is
+ * published via the Trading API as a Classified Ad; everything else goes
+ * through the REST Sell Inventory API. The `description` column now stores
+ * the human-readable category path (e.g. "Cars, Motorcycles & Vehicles >
+ * Cars > BMW") and is no longer consulted for routing.
  */
 
-// VEHICLE DESCRIPTION TAG
-const VEHICLE_DESCRIPTION_TAG = "vehicle";
-/** Case-insensitive marker expected in aa.lookups.description for vehicle categories. */
+// VEHICLE EXTRA TAG
+const VEHICLE_EXTRA_TAG = "vehicle";
+/** Case-insensitive token expected in aa.lookups.extra for vehicle categories. */
 
 // IS VEHICLE CATEGORY
 export async function isVehicleCategory(categoryId: string | null | undefined): Promise<boolean> {
     /**
      * Returns true when the given eBay category id should be published as a
      * Classified Ad through the Trading API. Routing is driven by the
-     * `description` column on the aa.lookups row for this category
-     * (description = 'vehicle' means use Trading). The
-     * AUTO_ADS_EBAY_VEHICLE_CATEGORY_IDS environment variable
-     * (comma-separated) is still honoured as a short-circuit override for
-     * cases where the database has not yet been seeded with the flag.
+     * `extra` column on the aa.lookups row for this category: when the
+     * comma-delimited list contains 'vehicle' (case-insensitive), the
+     * Trading path is used. The AUTO_ADS_EBAY_VEHICLE_CATEGORY_IDS
+     * environment variable (comma-separated) is still honoured as a
+     * short-circuit override for cases where the database has not yet been
+     * seeded with the flag.
      */
 
     if (!categoryId?.trim()) return false;
@@ -60,18 +63,24 @@ export async function isVehicleCategory(categoryId: string | null | undefined): 
         if (ids.includes(id)) return true;
     }
 
-    // consult the lookups table for the category's routing tag
+    // consult the lookups table for the category's routing flags
     try {
         const [row] = await getAutoAdsDb()
-            .select({description: lookups.description})
+            .select({extra: lookups.extra})
             .from(lookups)
             .where(and(
                 eq(lookups.lookupType, EBAY_CATEGORY_LOOKUP_TYPE),
                 eq(lookups.code, id),
             ))
             .limit(1);
-        const desc = row?.description?.trim().toLowerCase();
-        return desc === VEHICLE_DESCRIPTION_TAG;
+
+        // split the comma-delimited extra column into tokens and check for
+        // the vehicle marker; null/empty extras simply fall through as false
+        const tokens = (row?.extra ?? "")
+            .split(",")
+            .map((s) => s.trim().toLowerCase())
+            .filter(Boolean);
+        return tokens.includes(VEHICLE_EXTRA_TAG);
     } catch (err) {
         // an error here shouldn't prevent all publishing, so fall back to
         // the safer non-vehicle path and let the caller surface any eBay error
@@ -125,13 +134,16 @@ function sortImageUrls(images: ListingImageRow[]): string[] {
 function specsToFeatureLines(specsAndFeatures: string | null): string[] {
     /**
      * Splits a multiline specs-and-features string into trimmed, non-empty
-     * lines for use as a multi-valued Features item specific.
+     * lines for use as a multi-valued Features item specific. Any leading
+     * markdown bullet marker ("- ", "* ", or "• ") is stripped because eBay
+     * joins multi-valued aspects with commas and the bullet glyphs would
+     * otherwise show up inline (e.g. "- Heated seats, - Bluetooth").
      */
 
     if (!specsAndFeatures?.trim()) return [];
     return specsAndFeatures
         .split(/\r?\n/)
-        .map((line) => line.trim())
+        .map((line) => line.trim().replace(/^(?:[-*•])\s+/, "").trim())
         .filter(Boolean);
 }
 
@@ -161,31 +173,37 @@ function addNameValue(
 }
 
 // BUILD ITEM SPECIFICS
-function buildItemSpecifics(listing: resaleListing): NameValueList[] {
+function buildItemSpecifics(listing: PublishableListing): NameValueList[] {
     /**
-     * Maps resale vehicle fields to the Trading API ItemSpecifics structure.
-     * This mirrors the aspects built for the Sell Inventory path so buyers
-     * see the same specification labels regardless of publish route.
+     * Maps the publishable listing's vehicle aspects (when present) to the
+     * Trading API ItemSpecifics structure, mirroring the aspects used on the
+     * Sell Inventory path so buyers see the same labels regardless of
+     * publish route. When the listing is not a vehicle (`vehicle` is
+     * undefined) the only specifics produced are the optional Features
+     * lines extracted from `specsAndFeatures`.
      */
 
     const list: NameValueList[] = [];
 
-    addNameValue(list, "Year", listing.year);
-    if (listing.mileage != null) {
-        const unit = listing.mileageUnit?.trim() || "miles";
-        list.push({Name: "Mileage", Value: [`${listing.mileage} ${unit}`]});
+    const vehicle = listing.vehicle;
+    if (vehicle) {
+        addNameValue(list, "Year", vehicle.year);
+        // ebay's mileage item specific must be numeric only; the unit is
+        // implied by the marketplace (miles on uk, km on most eu sites) so
+        // we never append a unit here even when one is set
+        addNameValue(list, "Mileage", vehicle.mileage);
+        addNameValue(list, "Fuel Type", vehicle.fuelType);
+        addNameValue(list, "Transmission", vehicle.gearboxType);
+        addNameValue(list, "Colour", vehicle.colour);
+        addNameValue(list, "Body Type", vehicle.bodyType);
+        addNameValue(list, "Engine Size", vehicle.engineSize);
+        addNameValue(list, "Seats", vehicle.seats);
+        addNameValue(list, "Previous owners", vehicle.numberOfOwners);
+        addNameValue(list, "Vehicle Registration Mark", vehicle.registration);
+        addNameValue(list, "MOT Expiry Date", vehicle.motExpiry);
+        addNameValue(list, "MOT status", vehicle.motStatus);
+        addNameValue(list, "Emission class", vehicle.emissionClass);
     }
-    addNameValue(list, "Fuel Type", listing.fuelType);
-    addNameValue(list, "Transmission", listing.gearboxType);
-    addNameValue(list, "Colour", listing.colour);
-    addNameValue(list, "Body Type", listing.bodyType);
-    addNameValue(list, "Engine Size", listing.engineSize);
-    addNameValue(list, "Seats", listing.seats);
-    addNameValue(list, "Previous owners", listing.numberOfOwners);
-    addNameValue(list, "Vehicle Registration Mark", listing.registration);
-    addNameValue(list, "MOT Expiry Date", listing.motExpiry);
-    addNameValue(list, "MOT status", listing.motStatus);
-    addNameValue(list, "Emission class", listing.emissionClass);
 
     const features = specsToFeatureLines(listing.specsAndFeatures);
     if (features.length > 0) {
@@ -248,7 +266,7 @@ function tradingCurrencyForMarketplace(marketplaceId: string): string {
 
 // BUILD CLASSIFIED AD ITEM
 function buildClassifiedAdItem(
-    listing: resaleListing,
+    listing: PublishableListing,
     images: ListingImageRow[],
     marketplaceId: string,
 ): Record<string, unknown> {
@@ -287,8 +305,8 @@ function buildClassifiedAdItem(
     }
 
     const listingCurrency = currencySymbolToIso(listing.currencySymbol);
-    const title = truncateTitle(listing.shortDescription);
-    const description = listing.fullDescription?.trim() || listing.shortDescription || "";
+    const title = truncateTitle(listing.title);
+    const description = listing.body?.trim() || listing.title || "";
     const pictureUrls = sortImageUrls(images);
     const itemSpecifics = buildItemSpecifics(listing);
 
@@ -350,7 +368,7 @@ function buildClassifiedAdItem(
 
 // ADD CLASSIFIED AD
 async function addClassifiedAd(
-    listing: resaleListing,
+    listing: PublishableListing,
     images: ListingImageRow[],
 ): Promise<string> {
     /**
@@ -379,7 +397,7 @@ async function addClassifiedAd(
 
 // REVISE CLASSIFIED AD
 async function reviseClassifiedAd(
-    listing: resaleListing,
+    listing: PublishableListing,
     images: ListingImageRow[],
     itemId: string,
 ): Promise<void> {
@@ -430,11 +448,11 @@ async function getItemListingStatus(itemId: string): Promise<string | null> {
 
 // CREATE OR REVISE CLASSIFIED AD
 export async function createOrReviseClassifiedAd(
-    listing: resaleListing,
+    listing: PublishableListing,
     images: ListingImageRow[],
 ): Promise<ClassifiedAdResult> {
     /**
-     * Publishes or updates a resale vehicle listing as an eBay Motors
+     * Publishes or updates a publishable listing as an eBay Motors
      * Classified Ad via the Trading API. If the listing already has a stored
      * ebayItemId and that remote listing is still Active, it is revised in
      * place so the public URL does not change; otherwise a new ad is added
