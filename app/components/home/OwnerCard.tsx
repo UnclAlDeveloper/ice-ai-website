@@ -28,6 +28,26 @@ interface OwnerCardProps {
     imageSrc?: string;
 }
 
+// SPLIT EMAIL FOR WRAP
+const splitEmailForWrap = (email: string): {localPart: string; domainPart: string} => {
+    /**
+     * Splits an email address into local and domain parts at the first "@"
+     * so rendering can insert a break opportunity exactly before the "@"
+     * character on narrow screens. Falls back to the original value when
+     * there is no "@".
+     */
+
+    const atIndex = email.indexOf("@");
+    if (atIndex <= 0 || atIndex === email.length - 1) {
+        return {localPart: email, domainPart: ""};
+    }
+
+    return {
+        localPart: email.slice(0, atIndex),
+        domainPart: email.slice(atIndex + 1),
+    };
+};
+
 // NORMALIZE PUBLIC PATH
 const normalizePublicPath = (value: string | undefined): string | undefined => {
     /**
@@ -58,10 +78,10 @@ export default function OwnerCard({
      * primary contact channels: phone, email, Facebook profile and
      * eBay. All values are supplied by the server-side parent from the
      * AUTO_ADS_* environment variables, and any row whose env value is
-     * missing is hidden instead of showing an empty placeholder. On
-     * narrow viewports the image and contact details stack vertically
-     * so everything stays comfortably readable on a phone, while on
-     * wider screens the portrait sits beside the contact column.
+     * missing is hidden instead of showing an empty placeholder. The
+     * portrait remains on the left across viewport sizes, while contact
+     * rows use tighter spacing on phones so the full card fits within
+     * narrow screens.
      */
 
     // resolve optional inputs to renderable forms; treat empty strings as absent
@@ -71,20 +91,25 @@ export default function OwnerCard({
     const trimmedEmail = email?.trim() || "";
     const trimmedFacebookUrl = facebookUrl?.trim() || "";
     const trimmedEbayUrl = ebayUrl?.trim() || "";
+    const {localPart: emailLocalPart, domainPart: emailDomainPart} = splitEmailForWrap(trimmedEmail);
 
     return (
         <Card
             sx={{
                 mt: 0.5,
                 mb: 0.5,
+                width: "100%",
+                maxWidth: "100%",
+                overflow: "hidden",
                 bgcolor: (theme) => alpha(theme.palette.background.paper, 0.5),
             }}
         >
-            <CardContent sx={{py: 0.75, px: 1.5, "&:last-child": {pb: 0.75}}}>
+            <CardContent sx={{py: 0.75, px: {xs: 1, sm: 1.5}, "&:last-child": {pb: 0.75}}}>
                 <Stack
                     direction="row"
-                    spacing={{xs: 2, sm: 3}}
+                    spacing={{xs: 1.25, sm: 3}}
                     alignItems="center"
+                    sx={{minWidth: 0, width: "100%"}}
                 >
                     {resolvedImageSrc && (
                         // caricature portrait of the owner, kept at the source 3:4 aspect
@@ -93,7 +118,7 @@ export default function OwnerCard({
                         <Box
                             sx={{
                                 position: "relative",
-                                height: 150,
+                                height: {xs: 112, sm: 150},
                                 aspectRatio: OWNER_IMAGE_ASPECT_RATIO,
                                 flexShrink: 0,
                                 borderRadius: 2,
@@ -114,23 +139,28 @@ export default function OwnerCard({
 
                     {/* contact column: name on top with phone, email, facebook and ebay stacked beneath */}
                     <Stack
-                        spacing={1}
+                        spacing={{xs: 0.25, sm: 1}}
                         alignItems="flex-start"
                         sx={{textAlign: "left", minWidth: 0, flex: 1}}
                     >
                         {trimmedName && (
-                            <Typography variant="h5" component="div">
+                            <Typography
+                                variant="h5"
+                                component="div"
+                                sx={{fontSize: {xs: "1.25rem", sm: "1.5rem"}, lineHeight: 1.2}}
+                            >
                                 {trimmedName}
                             </Typography>
                         )}
 
                         {trimmedPhone && (
-                            <Stack direction="row" spacing={1} alignItems="center">
+                            <Stack direction="row" spacing={{xs: 0.5, sm: 1}} alignItems="center" sx={{minWidth: 0, flexWrap: "wrap"}}>
                                 <PhoneIcon fontSize="small" color="action" />
                                 <Link
                                     href={`tel:${trimmedPhone.replace(/\s+/g, "")}`}
                                     underline="hover"
                                     color="inherit"
+                                    sx={{fontSize: {xs: "0.9rem", sm: "1rem"}}}
                                 >
                                     {trimmedPhone}
                                 </Link>
@@ -138,21 +168,37 @@ export default function OwnerCard({
                         )}
 
                         {trimmedEmail && (
-                            <Stack direction="row" spacing={1} alignItems="center">
+                            <Stack direction="row" spacing={{xs: 0.5, sm: 1}} alignItems="center" sx={{minWidth: 0, flexWrap: "wrap"}}>
                                 <EmailIcon fontSize="small" color="action" />
                                 <Link
                                     href={`mailto:${trimmedEmail}`}
                                     underline="hover"
                                     color="inherit"
-                                    sx={{wordBreak: "break-all"}}
+                                    sx={{
+                                        wordBreak: "normal",
+                                        overflowWrap: "anywhere",
+                                        minWidth: 0,
+                                        maxWidth: "100%",
+                                        whiteSpace: "normal",
+                                        display: "inline",
+                                        fontSize: {xs: "0.9rem", sm: "1rem"},
+                                    }}
                                 >
-                                    {trimmedEmail}
+                                    {emailDomainPart ? (
+                                        <>
+                                            {emailLocalPart}
+                                            <br />
+                                            @{emailDomainPart}
+                                        </>
+                                    ) : (
+                                        trimmedEmail
+                                    )}
                                 </Link>
                             </Stack>
                         )}
 
                         {trimmedFacebookUrl && (
-                            <Stack direction="row" spacing={1} alignItems="center">
+                            <Stack direction="row" spacing={{xs: 0.5, sm: 1}} alignItems="center">
                                 <FacebookIcon fontSize="small" sx={{color: "#1877F2"}} />
                                 <Link
                                     href={trimmedFacebookUrl}
@@ -160,6 +206,7 @@ export default function OwnerCard({
                                     rel="noopener noreferrer"
                                     underline="hover"
                                     color="inherit"
+                                    sx={{fontSize: {xs: "0.9rem", sm: "1rem"}}}
                                 >
                                     Facebook
                                 </Link>
@@ -167,7 +214,7 @@ export default function OwnerCard({
                         )}
 
                         {trimmedEbayUrl && (
-                            <Stack direction="row" spacing={1} alignItems="center">
+                            <Stack direction="row" spacing={{xs: 0.5, sm: 1}} alignItems="center">
                                 {/* small ebay brand mark in place of an icon */}
                                 <Box
                                     component="img"
@@ -182,6 +229,7 @@ export default function OwnerCard({
                                     rel="noopener noreferrer"
                                     underline="hover"
                                     color="inherit"
+                                    sx={{fontSize: {xs: "0.9rem", sm: "1rem"}}}
                                 >
                                     eBay
                                 </Link>
