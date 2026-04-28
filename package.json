@@ -34,7 +34,8 @@
     "diagnose:ebay-setup": "tsx scripts/diagnoseEbaySetup.ts",
     "fix:ebay-sale-policies": "tsx scripts/createEbaySaleItemPolicies.ts",
     "fix:ebay-out-of-stock-control": "tsx scripts/optInOutOfStockControl.ts",
-    "verify:ebay-trading-sale-item": "tsx scripts/verifyEbayTradingFixedPriceForSaleItems.ts"
+    "verify:ebay-trading-sale-item": "tsx scripts/verifyEbayTradingFixedPriceForSaleItems.ts",
+    "sync:python-md-links": "node scripts/sync-python-md-links.cjs"
   },
   "dependencies": {
     "@aws-sdk/client-cognito-identity-provider": "^3.936.0",

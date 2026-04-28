@@ -6,6 +6,7 @@ import {prospectListings, lookups} from "@/drizzle/auto-ads/schema";
 import {eq, and, ne, inArray} from "drizzle-orm";
 import {getServerSessionFromCookies} from "@app/lib/session";
 import {revalidatePath} from "next/cache";
+import {processAiAnalysisForListing, type AiAnalysisFields} from "@app/auto-ads/lib/aiAnalysis";
 
 // PROSPECT LISTING DATA
 export type ProspectListingData = {
@@ -326,6 +327,107 @@ export async function saveProspectListing(data: ProspectListingData): Promise<{
         return {success: true, id: inserted.id};
     } catch (err) {
         console.error("Failed to save prospect listing:", err);
+        return {success: false, error: err instanceof Error ? err.message : String(err)};
+    }
+}
+
+// VEHICLE TYPE
+export type VehicleType = "Car" | "Van";
+/** Selector value driving which prompt template the AI analysis uses. */
+
+// PROMPT FILENAME FOR VEHICLE TYPE
+const PROMPT_FILENAME_FOR_VEHICLE_TYPE: Record<VehicleType, string> = {
+    Car: "car_prompt.md",
+    Van: "van_prompt.md",
+};
+/** Maps each vehicle type to the markdown prompt file under app/. */
+
+// GET PROSPECT AI ANALYSIS
+export async function getProspectAiAnalysis(listingId: number): Promise<{
+    success: boolean;
+    fields?: AiAnalysisFields;
+    error?: string;
+}> {
+    /**
+     * Fetches the AI analysis fields currently stored on a prospect listing.
+     * Used by the manual-entry editor to populate the AI Assistant section
+     * when a listing is loaded so previously generated output is visible.
+     */
+
+    const session = await getServerSessionFromCookies();
+    if (!session) {
+        return {success: false, error: "Not authenticated"};
+    }
+
+    try {
+        const [row] = await getAutoAdsDb()
+            .select({
+                aiResellOverview: prospectListings.aiResellOverview,
+                aiWorkAndRepairs: prospectListings.aiWorkAndRepairs,
+                aiResellNotes: prospectListings.aiResellNotes,
+                aiValueAddImprovements: prospectListings.aiValueAddImprovements,
+                aiCampervanConversion: prospectListings.aiCampervanConversion,
+                aiTargetMarket: prospectListings.aiTargetMarket,
+                aiBuyPriceLow: prospectListings.aiBuyPriceLow,
+                aiBuyPriceHigh: prospectListings.aiBuyPriceHigh,
+                aiRepairCost: prospectListings.aiRepairCost,
+                aiSellPriceLow: prospectListings.aiSellPriceLow,
+                aiSellPriceHigh: prospectListings.aiSellPriceHigh,
+            })
+            .from(prospectListings)
+            .where(eq(prospectListings.id, listingId));
+
+        if (!row) {
+            return {success: false, error: "Listing not found"};
+        }
+
+        return {success: true, fields: row};
+    } catch (err) {
+        console.error("Failed to fetch prospect AI analysis:", err);
+        return {success: false, error: err instanceof Error ? err.message : String(err)};
+    }
+}
+
+// RUN AI ANALYSIS
+export async function runAiAnalysis(
+    listingId: number,
+    vehicleType: VehicleType,
+): Promise<{success: boolean; fields?: AiAnalysisFields; error?: string}> {
+    /**
+     * Runs the AI analysis workflow for a manually-entered prospect listing
+     * using the prompt template selected by vehicleType. Loads the listing,
+     * passes it through processAiAnalysisForListing which calls Gemini and
+     * persists the parsed fields, then revalidates affected paths.
+     */
+
+    const session = await getServerSessionFromCookies();
+    if (!session) {
+        return {success: false, error: "Not authenticated"};
+    }
+
+    try {
+        // load the full listing row to feed into the analysis
+        const [listing] = await getAutoAdsDb()
+            .select()
+            .from(prospectListings)
+            .where(eq(prospectListings.id, listingId));
+
+        if (!listing) {
+            return {success: false, error: "Listing not found"};
+        }
+
+        const promptFilename = PROMPT_FILENAME_FOR_VEHICLE_TYPE[vehicleType];
+        const result = await processAiAnalysisForListing(promptFilename, listing);
+
+        if (!result.success || !result.fields) {
+            return {success: false, error: result.error || "AI analysis failed"};
+        }
+
+        revalidatePath("/auto-ads/manual-entry");
+        revalidatePath("/auto-ads/prospects");
+        return {success: true, fields: result.fields};
+    } catch (err) {
+        console.error("Failed to run AI analysis:", err);
         return {success: false, error: err instanceof Error ? err.message : String(err)};
     }
 }

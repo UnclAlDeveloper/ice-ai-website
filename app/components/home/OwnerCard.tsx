@@ -28,26 +28,6 @@ interface OwnerCardProps {
     imageSrc?: string;
 }
 
-// SPLIT EMAIL FOR WRAP
-const splitEmailForWrap = (email: string): {localPart: string; domainPart: string} => {
-    /**
-     * Splits an email address into local and domain parts at the first "@"
-     * so rendering can insert a break opportunity exactly before the "@"
-     * character on narrow screens. Falls back to the original value when
-     * there is no "@".
-     */
-
-    const atIndex = email.indexOf("@");
-    if (atIndex <= 0 || atIndex === email.length - 1) {
-        return {localPart: email, domainPart: ""};
-    }
-
-    return {
-        localPart: email.slice(0, atIndex),
-        domainPart: email.slice(atIndex + 1),
-    };
-};
-
 // NORMALIZE PUBLIC PATH
 const normalizePublicPath = (value: string | undefined): string | undefined => {
     /**
@@ -91,7 +71,6 @@ export default function OwnerCard({
     const trimmedEmail = email?.trim() || "";
     const trimmedFacebookUrl = facebookUrl?.trim() || "";
     const trimmedEbayUrl = ebayUrl?.trim() || "";
-    const {localPart: emailLocalPart, domainPart: emailDomainPart} = splitEmailForWrap(trimmedEmail);
 
     return (
         <Card
@@ -184,15 +163,7 @@ export default function OwnerCard({
                                         fontSize: {xs: "0.9rem", sm: "1rem"},
                                     }}
                                 >
-                                    {emailDomainPart ? (
-                                        <>
-                                            {emailLocalPart}
-                                            <br />
-                                            @{emailDomainPart}
-                                        </>
-                                    ) : (
-                                        trimmedEmail
-                                    )}
+                                    {trimmedEmail}
                                 </Link>
                             </Stack>
                         )}

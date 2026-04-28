@@ -44,3 +44,6 @@ next-env.d.ts
 
 # next-agents-md
 .next-docs/
+
+# Prompt files and markdown
+*_prompt.md

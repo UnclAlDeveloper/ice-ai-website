@@ -21,12 +21,14 @@ import SaveIcon from "@mui/icons-material/Save";
 import AddPhotoAlternateIcon from "@mui/icons-material/AddPhotoAlternate";
 import PhotoIcon from "@mui/icons-material/Photo";
 import DeleteIcon from "@mui/icons-material/Delete";
-import {saveProspectListing} from "../manual-entry/actions";
-import type {ProspectListingData} from "../manual-entry/actions";
+import {saveProspectListing, runAiAnalysis, getProspectAiAnalysis} from "../manual-entry/actions";
+import type {ProspectListingData, VehicleType} from "../manual-entry/actions";
 import SearchIcon from "@mui/icons-material/Search";
+import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
 import {fetchListingImages, uploadListingImage, deleteListingImage, detectNumberplate, lookupRegistration} from "./actions";
 import type {DvlaVehicleData} from "./actions";
 import {deriveShortDescription} from "../lib/deriveShortDescription";
+import AiAnalysisSection, {type AiAnalysisData} from "./AiAnalysisSection";
 
 // STATUS OPTIONS
 const STATUS_OPTIONS = ["New", "Viewed", "Not Interested", "Interested", "Bought", "Sold"] as const;
@@ -108,6 +110,11 @@ export default function ProspectListingEditor({data, lookupMap, onSaved, pending
     const fileInputRef = useRef<HTMLInputElement>(null);
     const primaryFileInputRef = useRef<HTMLInputElement>(null);
 
+    // ai analysis state: which prompt to use, the latest analysis fields, and whether a run is in flight
+    const [vehicleType, setVehicleType] = useState<VehicleType>("Van");
+    const [aiAnalysis, setAiAnalysis] = useState<AiAnalysisData | null>(null);
+    const [runningAi, setRunningAi] = useState(false);
+
     const primaryImage = imageList.find((img) => img.isPrimary === true) ?? null;
     const secondaryImages = imageList.filter((img) => !img.isPrimary);
 
@@ -138,6 +145,21 @@ export default function ProspectListingEditor({data, lookupMap, onSaved, pending
         } else {
             setImageList([]);
         }
+    }, [formData.id]);
+
+    // load existing ai analysis fields when the listing id changes so the section reflects saved output
+    useEffect(() => {
+        if (!formData.id) {
+            setAiAnalysis(null);
+            return;
+        }
+        getProspectAiAnalysis(formData.id).then((result) => {
+            if (result.success && result.fields) {
+                setAiAnalysis(result.fields);
+            } else {
+                setAiAnalysis(null);
+            }
+        });
     }, [formData.id]);
 
     const [lookingUp, setLookingUp] = useState(false);
@@ -347,6 +369,36 @@ export default function ProspectListingEditor({data, lookupMap, onSaved, pending
             setImageList((prev) => prev.filter((img) => img.id !== imageId));
         } else {
             setSnackbar({open: true, message: result.error || "Failed to delete image", severity: "error"});
+        }
+    };
+
+    // HANDLE RUN AI ANALYSIS
+    const handleRunAiAnalysis = async () => {
+        /**
+         * Calls the runAiAnalysis server action with the currently selected
+         * vehicle type, then updates the local AI Assistant section with
+         * the freshly persisted fields. Disabled until the listing has been
+         * saved (so a database id exists to attach the results to).
+         */
+
+        if (!formData.id) {
+            setSnackbar({open: true, message: "Save the listing before running AI analysis", severity: "error"});
+            return;
+        }
+
+        setRunningAi(true);
+        try {
+            const result = await runAiAnalysis(formData.id, vehicleType);
+            if (result.success && result.fields) {
+                setAiAnalysis(result.fields);
+                setSnackbar({open: true, message: "AI analysis complete", severity: "success"});
+            } else {
+                setSnackbar({open: true, message: result.error || "AI analysis failed", severity: "error"});
+            }
+        } catch (err) {
+            setSnackbar({open: true, message: err instanceof Error ? err.message : "AI analysis failed", severity: "error"});
+        } finally {
+            setRunningAi(false);
         }
     };
 
@@ -802,6 +854,51 @@ export default function ProspectListingEditor({data, lookupMap, onSaved, pending
                     {saving ? "Saving…" : formData.id ? "Update" : "Create"}
                 </Button>
             </Box>
+
+            {/* --- ai analysis --- */}
+            <Typography variant="subtitle2" color="text.secondary" sx={{mt: 3, mb: 1}}>
+                AI Analysis
+            </Typography>
+            {formData.id ? (
+                <>
+                    <Box sx={{display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap", mb: 2}}>
+                        <FormControl size="small" sx={{minWidth: 140}}>
+                            <InputLabel id="vehicle-type-label">Vehicle Type</InputLabel>
+                            <Select
+                                labelId="vehicle-type-label"
+                                label="Vehicle Type"
+                                value={vehicleType}
+                                onChange={(e) => setVehicleType(e.target.value as VehicleType)}
+                            >
+                                <MenuItem value="Car">Car</MenuItem>
+                                <MenuItem value="Van">Van</MenuItem>
+                            </Select>
+                        </FormControl>
+                        <Button
+                            type="button"
+                            variant="outlined"
+                            disabled={runningAi}
+                            onClick={handleRunAiAnalysis}
+                            startIcon={runningAi ? <CircularProgress size={16} /> : <AutoAwesomeIcon />}
+                        >
+                            {runningAi ? "Analysing…" : "Do AI Analysis"}
+                        </Button>
+                    </Box>
+                    {aiAnalysis && (
+                        <AiAnalysisSection
+                            data={aiAnalysis}
+                            askingPrice={formData.askingPrice}
+                            currencySymbol={formData.currencySymbol}
+                            canViewPricing
+                            defaultExpanded
+                        />
+                    )}
+                </>
+            ) : (
+                <Typography variant="body2" color="text.secondary">
+                    Save the listing first to run AI analysis.
+                </Typography>
+            )}
 
             {/* --- images --- */}
             <Typography variant="subtitle2" color="text.secondary" sx={{mt: 3, mb: 1}}>
