@@ -67,7 +67,7 @@ export async function fetchListingImages(
 export async function updateProspectInterest(
     listingId: number,
     interestLevel: number,
-    status: 'Not Interested' | 'Interested',
+    status: 'NotInterested' | 'Interested',
     adsEstBuyPrice: number | null,
     adsEstSellPrice: number | null,
 ): Promise<{success: boolean; error?: string}> {

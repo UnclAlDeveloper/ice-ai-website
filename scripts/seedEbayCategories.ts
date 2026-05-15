@@ -1,23 +1,13 @@
-import {readFileSync} from "fs";
-import {resolve} from "path";
 import eBayApi from "ebay-api";
 import {drizzle} from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import {and, eq, sql} from "drizzle-orm";
 import * as schema from "../drizzle/auto-ads/schema";
 import {getEbayApiClient} from "../app/auto-ads/lib/ebayClient";
+import {loadEnv} from "./loadEnv";
 
-// load env vars from .env.dev in the parent directory
-const envPath = resolve(__dirname, "../../.env.dev");
-for (const line of readFileSync(envPath, "utf-8").split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const eqIdx = trimmed.indexOf("=");
-    if (eqIdx === -1) continue;
-    const key = trimmed.slice(0, eqIdx).trim();
-    const val = trimmed.slice(eqIdx + 1).trim().replace(/^["']|["']$/g, "");
-    if (!process.env[key]) process.env[key] = val;
-}
+// hydrate process.env from the shared .env plus the per-environment override
+loadEnv();
 
 const {lookups} = schema;
 

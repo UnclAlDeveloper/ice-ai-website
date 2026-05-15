@@ -181,29 +181,42 @@ async function fetchImageAsPart(url: string): Promise<InlineImagePart | null> {
     }
 }
 
+// AI ANALYSIS RESULT
+export type AiAnalysisGenerationResult =
+    | {success: true; text: string}
+    | {success: false; error: string};
+/**
+ * Discriminated result returned by generateAiAnalysis. On failure the error
+ * field carries a human-readable explanation suitable for displaying in the
+ * UI, so callers do not have to fall back to a generic message.
+ */
+
 // GENERATE AI ANALYSIS
 export async function generateAiAnalysis(
     promptFilename: string,
     listing: ProspectListingRow,
     imageUrls: string[] = [],
-): Promise<string | null> {
+): Promise<AiAnalysisGenerationResult> {
     /**
      * Builds the full prompt by combining the prompt template with the
      * markdown summary of the listing, then calls Gemini with any supplied
      * image URLs alongside the text. Returns the raw markdown response or
-     * null if the API key, model name, or response is missing.
+     * a descriptive error explaining why no text could be produced (missing
+     * configuration, API exception, empty response, safety block, etc.).
      */
 
     const apiKey = process.env.AUTO_ADS_GOOGLE_API_KEY;
     const modelName = process.env.GEMINI_MODEL_NAME;
 
     if (!apiKey) {
-        console.error("[AI ANALYSIS] AUTO_ADS_GOOGLE_API_KEY is not set");
-        return null;
+        const error = "AUTO_ADS_GOOGLE_API_KEY is not set";
+        console.error(`[AI ANALYSIS] ${error}`);
+        return {success: false, error};
     }
     if (!modelName) {
-        console.error("[AI ANALYSIS] GEMINI_MODEL_NAME is not set");
-        return null;
+        const error = "GEMINI_MODEL_NAME is not set";
+        console.error(`[AI ANALYSIS] ${error}`);
+        return {success: false, error};
     }
 
     // load prompt template and substitute today's date
@@ -214,16 +227,22 @@ export async function generateAiAnalysis(
     const listingMarkdown = convertProspectListingToMarkdown(listing);
     const fullPrompt = `${prompt}\n\n${listingMarkdown}`;
 
-    // fetch all images in parallel, skip any that fail to download
-    const imageParts = (await Promise.all(imageUrls.map(fetchImageAsPart)))
-        .filter((p): p is InlineImagePart => p !== null);
+    // fetch all images in parallel and report how many of the requested urls actually came back
+    const fetchedImages = await Promise.all(imageUrls.map(fetchImageAsPart));
+    const imageParts = fetchedImages.filter((p): p is InlineImagePart => p !== null);
+    const failedImageCount = imageUrls.length - imageParts.length;
+    if (failedImageCount > 0) {
+        console.warn(`[AI ANALYSIS] ${failedImageCount}/${imageUrls.length} images failed to download`);
+    }
 
     const userParts: object[] = [{text: fullPrompt}, ...imageParts];
 
     const ai = new GoogleGenAI({apiKey});
 
     try {
-        console.log(`[AI ANALYSIS] Calling Gemini API: model=${modelName}, images=${imageParts.length}`);
+        console.log(
+            `[AI ANALYSIS] Calling Gemini API: model=${modelName}, images=${imageParts.length}, prompt=${fullPrompt.length} chars`,
+        );
         const startTime = Date.now();
 
         const response = await ai.models.generateContent({
@@ -235,11 +254,33 @@ export async function generateAiAnalysis(
         const text = response.text?.trim() || "";
         console.log(`[AI ANALYSIS] Gemini responded in ${duration}ms (${text.length} chars)`);
 
-        if (!text) return null;
-        return text;
+        if (text) {
+            return {success: true, text};
+        }
+
+        // empty response — extract any diagnostic info gemini returned so the user knows why
+        const candidate = response.candidates?.[0];
+        const finishReason = candidate?.finishReason;
+        const blockReason = response.promptFeedback?.blockReason;
+        const blockMessage = response.promptFeedback?.blockReasonMessage;
+
+        const detailParts: string[] = [];
+        if (blockReason) {
+            detailParts.push(`prompt blocked (${blockReason}${blockMessage ? `: ${blockMessage}` : ""})`);
+        }
+        if (finishReason) {
+            detailParts.push(`finishReason=${finishReason}`);
+        }
+
+        const error = detailParts.length
+            ? `Gemini returned no text — ${detailParts.join(", ")}`
+            : "Gemini returned no text";
+        console.error(`[AI ANALYSIS] ${error}`);
+        return {success: false, error};
     } catch (err) {
-        console.error("[AI ANALYSIS] Gemini API error:", err instanceof Error ? err.message : String(err));
-        return null;
+        const error = `Gemini API error: ${err instanceof Error ? err.message : String(err)}`;
+        console.error(`[AI ANALYSIS] ${error}`);
+        return {success: false, error};
     }
 }
 
@@ -414,13 +455,13 @@ export async function processAiAnalysisForListing(
         const imageUrls = imageUrlsOverride ?? (await fetchProspectImageUrls(listing.id));
 
         // generate raw markdown from Gemini
-        const rawAnalysis = await generateAiAnalysis(promptFilename, listing, imageUrls);
-        if (!rawAnalysis) {
-            return {success: false, error: "Empty AI analysis response"};
+        const generation = await generateAiAnalysis(promptFilename, listing, imageUrls);
+        if (!generation.success) {
+            return {success: false, error: generation.error};
         }
 
         // parse and persist
-        const fields = await applyAiAnalysis(listing.id, rawAnalysis);
+        const fields = await applyAiAnalysis(listing.id, generation.text);
         return {success: true, fields};
     } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

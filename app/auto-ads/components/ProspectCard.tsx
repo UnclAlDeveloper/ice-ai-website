@@ -22,8 +22,9 @@ import AiAnalysisSection from "./AiAnalysisSection";
 // STATUS COLOR MAP
 const statusColorMap: Record<string, string> = {
     'New': 'primary.main',           // theme color
+    'NotAvailable': '#bdbdbd',     // light grey
     'Viewed': 'info.main',           // theme color
-    'Not Interested': '#bdbdbd',     // light grey
+    'NotInterested': '#bdbdbd',     // light grey
     'Interested': 'success.main',    // theme color
     'Bought': '#9c27b0',             // custom hex (purple)
 };
@@ -153,13 +154,13 @@ export default function ProspectCard({listing, imageUrl, showCopyToResale}: Pros
     // HANDLE RATING CHANGE
     const handleRatingChange = (_event: React.SyntheticEvent, newValue: number | null) => {
         /**
-         * Updates local interest level and derives the status: 1-3 sets Not Interested,
+         * Updates local interest level and derives the status: 1-3 sets NotInterested,
          * 4-5 sets Interested, and null reverts to the original listing status.
          */
 
         setInterestLevel(newValue);
         if (newValue !== null && newValue >= 1 && newValue <= 3) {
-            setLocalStatus('Not Interested');
+            setLocalStatus('NotInterested');
         } else if (newValue !== null && newValue >= 4) {
             setLocalStatus('Interested');
         } else {
@@ -181,7 +182,7 @@ export default function ProspectCard({listing, imageUrl, showCopyToResale}: Pros
             if (adsEstSellPrice == null) return;
         }
 
-        const newStatus = interestLevel >= 4 ? 'Interested' as const : 'Not Interested' as const;
+        const newStatus = interestLevel >= 4 ? 'Interested' as const : 'NotInterested' as const;
 
         setSaving(true);
         try {

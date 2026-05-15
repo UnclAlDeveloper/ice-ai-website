@@ -31,7 +31,7 @@ import {deriveShortDescription} from "../lib/deriveShortDescription";
 import AiAnalysisSection, {type AiAnalysisData} from "./AiAnalysisSection";
 
 // STATUS OPTIONS
-const STATUS_OPTIONS = ["New", "Viewed", "Not Interested", "Interested", "Bought", "Sold"] as const;
+const STATUS_OPTIONS = ["New", "NotAvailable", "Viewed", "NotInterested", "Interested", "Bought", "Sold"] as const;
 /** All possible prospect listing statuses matching the database enum. */
 
 // AUTOCOMPLETE FIELD CONFIG

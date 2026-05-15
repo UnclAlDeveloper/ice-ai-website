@@ -8,7 +8,7 @@ export const listingSource = aa.enum(
 export const listingTable = aa.enum("listing_table", ['Prospect', 'Resale', 'SaleItem'])
 export const prospectListingStatus = aa.enum(
 	"prospect_listing_status",
-	['New', 'Viewed', 'Not Interested', 'Interested', 'Bought', 'Sold']
+	['New', 'NotAvailable', 'Viewed', 'NotInterested', 'Interested', 'Bought', 'Sold']
 )
 export const resaleListingStatus = aa.enum(
 	"resale_listing_status",
