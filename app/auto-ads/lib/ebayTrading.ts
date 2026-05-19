@@ -366,6 +366,43 @@ function buildClassifiedAdItem(
     return item;
 }
 
+// DEBUG TRADING PUBLISH
+function debugTradingPublish(): boolean {
+    /**
+     * Returns true when AUTO_ADS_EBAY_DEBUG_PUBLISH is set to a truthy
+     * value, gating the verbose request/response logging used to diagnose
+     * Trading API publish failures. Reuses the same env var as the REST
+     * Inventory path so a single switch turns on detailed logging across
+     * both publish routes.
+     */
+
+    const flag = (process.env.AUTO_ADS_EBAY_DEBUG_PUBLISH || "").toLowerCase();
+    return flag === "1" || flag === "true" || flag === "yes";
+}
+
+// LOG TRADING RESPONSE WARNINGS
+function logTradingResponseWarnings(callName: string, response: unknown): void {
+    /**
+     * Logs every Errors entry attached to a successful Trading API response.
+     * eBay returns advisories (such as "Some item specifics were renamed as
+     * per eBay recommendations.") with Ack=Warning and a populated Errors
+     * array even when the call succeeded; without this log they would
+     * silently vanish because callers only treat the missing ItemID as a
+     * problem. Always logged (not gated on the debug flag) so operators
+     * notice when eBay normalised parts of the listing.
+     */
+
+    if (!response || typeof response !== "object") return;
+    const ack = (response as {Ack?: string}).Ack;
+    const rawErrors = (response as {Errors?: EbayErrorEntry | EbayErrorEntry[]}).Errors;
+    const entries = Array.isArray(rawErrors) ? rawErrors : rawErrors ? [rawErrors] : [];
+    if (entries.length === 0) return;
+
+    const lines = entries.map(formatTradingErrorEntry).filter(Boolean);
+    if (lines.length === 0) return;
+    console.warn(`[ebay-trading] ${callName} returned Ack=${ack ?? "?"} with advisories:\n${lines.join("\n")}`);
+}
+
 // ADD CLASSIFIED AD
 async function addClassifiedAd(
     listing: PublishableListing,
@@ -381,10 +418,19 @@ async function addClassifiedAd(
         process.env.AUTO_ADS_EBAY_MARKETPLACE_ID?.trim() || eBayApi.MarketplaceId.EBAY_GB;
 
     const item = buildClassifiedAdItem(listing, images, marketplaceId);
+    if (debugTradingPublish()) {
+        console.log(`[ebay-trading] AddItem marketplaceId=${marketplaceId}`);
+        console.log("[ebay-trading] AddItem request:", JSON.stringify({Item: item}, null, 2));
+    }
 
     // hendt/ebay-api exposes the traditional trading api under ebay.trading.*
     const tradingClient = (ebay as unknown as {trading: {AddItem: (body: unknown) => Promise<unknown>}}).trading;
     const response = await tradingClient.AddItem({Item: item});
+
+    if (debugTradingPublish()) {
+        console.log("[ebay-trading] AddItem response:", JSON.stringify(response, null, 2));
+    }
+    logTradingResponseWarnings("AddItem", response);
 
     const itemId =
         (response as {ItemID?: string})?.ItemID ??
@@ -414,9 +460,18 @@ async function reviseClassifiedAd(
         ...buildClassifiedAdItem(listing, images, marketplaceId),
         ItemID: itemId,
     };
+    if (debugTradingPublish()) {
+        console.log(`[ebay-trading] ReviseItem marketplaceId=${marketplaceId} itemId=${itemId}`);
+        console.log("[ebay-trading] ReviseItem request:", JSON.stringify({Item: item}, null, 2));
+    }
 
     const tradingClient = (ebay as unknown as {trading: {ReviseItem: (body: unknown) => Promise<unknown>}}).trading;
-    await tradingClient.ReviseItem({Item: item});
+    const response = await tradingClient.ReviseItem({Item: item});
+
+    if (debugTradingPublish()) {
+        console.log("[ebay-trading] ReviseItem response:", JSON.stringify(response, null, 2));
+    }
+    logTradingResponseWarnings("ReviseItem", response);
 }
 
 // GET ITEM LISTING STATUS
@@ -484,83 +539,212 @@ export async function createOrReviseClassifiedAd(
     };
 }
 
-// FORMAT TRADING ERROR
-export function formatTradingError(err: unknown): string {
+// EBAY ERROR PARAMETER
+type EbayErrorParameter = {ParamID?: string; Value?: string | number};
+/**
+ * Single parameter hint attached to a Trading API Errors entry. eBay uses
+ * these to point at the specific field that caused the problem (for example
+ * Item.ItemSpecifics.NameValueList[0].Name).
+ */
+
+// EBAY ERROR ENTRY
+type EbayErrorEntry = {
+    LongMessage?: string;
+    ShortMessage?: string;
+    ErrorCode?: string | number;
+    SeverityCode?: string;
+    ErrorClassification?: string;
+    ErrorParameters?: EbayErrorParameter | EbayErrorParameter[];
+};
+/**
+ * Single Errors entry from a Trading API response. SeverityCode is "Error"
+ * for entries that caused Ack=Failure and "Warning" for advisory entries
+ * that did not block the request.
+ */
+
+// FORMAT TRADING ERROR ENTRY
+function formatTradingErrorEntry(entry: EbayErrorEntry): string {
     /**
-     * Extracts a human-readable message from an eBay Trading API error. The
-     * hendt/ebay-api client attaches the parsed XML response on the thrown
-     * error; this helper walks the common locations for the Errors array and
-     * returns every entry (one per line) with the error code, severity, long
-     * message and any parameter context, so the caller can show the full set
-     * of issues eBay reported rather than just the first one. Falls back to
-     * the raw Error message when nothing structured is available.
+     * Renders one Errors entry as a single human-readable line including
+     * severity, error code, classification, the long (or short) message, and
+     * any parameter hints. Returns an empty string when the entry has no
+     * usable text so the caller can skip it.
      */
 
-    if (!(err instanceof Error)) return String(err);
+    const codeParts: string[] = [];
+    if (entry.SeverityCode) codeParts.push(entry.SeverityCode);
+    if (entry.ErrorCode !== undefined) codeParts.push(`code ${entry.ErrorCode}`);
+    if (entry.ErrorClassification) codeParts.push(entry.ErrorClassification);
+    const prefix = codeParts.length > 0 ? `[${codeParts.join(" ")}] ` : "";
+    const body =
+        entry.LongMessage ||
+        entry.ShortMessage ||
+        (entry.ErrorCode !== undefined ? `eBay error ${entry.ErrorCode}` : "");
+    if (!prefix && !body) return "";
 
-    type EbayErrorParameter = {ParamID?: string; Value?: string | number};
-    type EbayErrorEntry = {
-        LongMessage?: string;
-        ShortMessage?: string;
-        ErrorCode?: string | number;
-        SeverityCode?: string;
-        ErrorClassification?: string;
-        ErrorParameters?: EbayErrorParameter | EbayErrorParameter[];
-    };
+    // include any parameter hints (e.g. which field caused the issue)
+    const params = Array.isArray(entry.ErrorParameters)
+        ? entry.ErrorParameters
+        : entry.ErrorParameters
+            ? [entry.ErrorParameters]
+            : [];
+    const paramText = params
+        .map((p) => (p?.ParamID ? `${p.ParamID}=${p.Value ?? ""}` : String(p?.Value ?? "")))
+        .filter(Boolean)
+        .join(", ");
+    const suffix = paramText ? ` (${paramText})` : "";
+
+    return `${prefix}${body}${suffix}`.trim();
+}
+
+// EXTRACT TRADING ERROR ENTRIES FROM XML
+function extractTradingErrorEntriesFromXml(xml: string): EbayErrorEntry[] {
+    /**
+     * Pulls every <Errors>…</Errors> block out of a raw Trading API XML
+     * response and returns them as parsed EbayErrorEntry records. Used as a
+     * last-resort fallback when the eBay client only exposes the raw XML
+     * string (which happens whenever axios surfaces meta.res.data without
+     * having transformed the response). A small regex pass is sufficient
+     * because Trading error blocks have a fixed shallow structure with no
+     * attributes and no nested CDATA sections.
+     */
+
+    const entries: EbayErrorEntry[] = [];
+    const blockRegex = /<Errors\b[^>]*>([\s\S]*?)<\/Errors>/g;
+    let match: RegExpExecArray | null;
+    while ((match = blockRegex.exec(xml)) !== null) {
+        const inner = match[1];
+        const pick = (tag: string): string | undefined => {
+            const m = inner.match(new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)</${tag}>`));
+            return m?.[1]?.trim();
+        };
+
+        // collect every <ErrorParameters ParamID="…"><Value>…</Value></ErrorParameters> entry
+        const params: EbayErrorParameter[] = [];
+        const paramRegex = /<ErrorParameters\b([^>]*)>([\s\S]*?)<\/ErrorParameters>/g;
+        let paramMatch: RegExpExecArray | null;
+        while ((paramMatch = paramRegex.exec(inner)) !== null) {
+            const attrs = paramMatch[1] || "";
+            const paramInner = paramMatch[2] || "";
+            const paramIdMatch = attrs.match(/ParamID\s*=\s*"([^"]*)"/);
+            const valueMatch = paramInner.match(/<Value>([\s\S]*?)<\/Value>/);
+            params.push({
+                ParamID: paramIdMatch?.[1],
+                Value: valueMatch?.[1]?.trim(),
+            });
+        }
+
+        const errorCodeRaw = pick("ErrorCode");
+        const errorCodeNum = errorCodeRaw !== undefined ? Number(errorCodeRaw) : NaN;
+        entries.push({
+            ShortMessage: pick("ShortMessage"),
+            LongMessage: pick("LongMessage"),
+            ErrorCode: Number.isFinite(errorCodeNum) ? errorCodeNum : errorCodeRaw,
+            SeverityCode: pick("SeverityCode"),
+            ErrorClassification: pick("ErrorClassification"),
+            ErrorParameters: params.length > 0 ? params : undefined,
+        });
+    }
+    return entries;
+}
+
+// COLLECT TRADING ERROR ENTRIES
+function collectTradingErrorEntries(err: Error): EbayErrorEntry[] {
+    /**
+     * Walks every place the hendt/ebay-api client may have stashed the
+     * parsed Errors payload from a Trading API response and returns the
+     * full set of entries. The library spreads the parsed response onto
+     * `error.meta` directly (so meta.Errors is the most reliable source
+     * for HTTP-200/Ack=Failure responses, which is the common shape for
+     * Trading failures), but also retains the original axios response
+     * body — sometimes as an object, sometimes as the raw XML string —
+     * under meta.res.body / meta.res.data. We try them in order and
+     * deduplicate by ErrorCode + ShortMessage so callers can display
+     * every error eBay reported rather than just the first one.
+     */
+
     type EbayErrorShape = Error & {
         meta?: {
+            Errors?: EbayErrorEntry | EbayErrorEntry[];
             res?: {
-                data?: {Errors?: EbayErrorEntry | EbayErrorEntry[]} | unknown;
-                body?: {Errors?: EbayErrorEntry | EbayErrorEntry[]} | unknown;
+                data?:
+                    | string
+                    | {Errors?: EbayErrorEntry | EbayErrorEntry[]}
+                    | {[k: string]: unknown}
+                    | unknown;
+                body?:
+                    | string
+                    | {Errors?: EbayErrorEntry | EbayErrorEntry[]}
+                    | {[k: string]: unknown}
+                    | unknown;
             };
         };
         Errors?: EbayErrorEntry | EbayErrorEntry[];
     };
 
     const shaped = err as EbayErrorShape;
+    const collected: EbayErrorEntry[] = [];
+    const seen = new Set<string>();
 
-    // the errors payload can live in a few different places depending on
-    // whether the library parsed the xml or left it on the axios response
-    const candidateContainers = [
+    const addEntries = (raw: unknown): void => {
+        const entries = Array.isArray(raw) ? raw : raw ? [raw] : [];
+        for (const entry of entries) {
+            if (!entry || typeof entry !== "object") continue;
+            const e = entry as EbayErrorEntry;
+            const key = `${e.ErrorCode ?? ""}|${e.ShortMessage ?? ""}|${e.LongMessage ?? ""}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            collected.push(e);
+        }
+    };
+
+    // candidate containers in priority order: meta itself (where the parsed
+    // response is spread), then meta.res.body / meta.res.data when they are
+    // already objects, then the error itself for completeness
+    const objectContainers: unknown[] = [
+        shaped.meta,
         shaped.meta?.res?.body,
         shaped.meta?.res?.data,
         shaped,
     ];
-    for (const container of candidateContainers) {
+    for (const container of objectContainers) {
         if (!container || typeof container !== "object") continue;
-        const errors = (container as {Errors?: EbayErrorEntry | EbayErrorEntry[]}).Errors;
-        const entries = Array.isArray(errors) ? errors : errors ? [errors] : [];
-        if (entries.length === 0) continue;
+        addEntries((container as {Errors?: unknown}).Errors);
+    }
 
-        // build one human-readable line per error entry
-        const lines: string[] = [];
-        for (const entry of entries) {
-            if (!entry || typeof entry !== "object") continue;
-            const codeParts: string[] = [];
-            if (entry.SeverityCode) codeParts.push(entry.SeverityCode);
-            if (entry.ErrorCode !== undefined) codeParts.push(`code ${entry.ErrorCode}`);
-            if (entry.ErrorClassification) codeParts.push(entry.ErrorClassification);
-            const prefix = codeParts.length > 0 ? `[${codeParts.join(" ")}] ` : "";
-            const body =
-                entry.LongMessage ||
-                entry.ShortMessage ||
-                (entry.ErrorCode !== undefined ? `eBay error ${entry.ErrorCode}` : "");
-            if (!prefix && !body) continue;
+    // last-resort xml fallback: when axios left the body as a raw string,
+    // parse it directly so we still get every entry instead of falling
+    // back to err.message (which the library has already collapsed to
+    // Errors[0].ShortMessage)
+    const rawCandidates: unknown[] = [shaped.meta?.res?.body, shaped.meta?.res?.data];
+    for (const raw of rawCandidates) {
+        if (typeof raw !== "string" || raw.length === 0) continue;
+        for (const entry of extractTradingErrorEntriesFromXml(raw)) addEntries(entry);
+    }
 
-            // include any parameter hints (e.g. which field caused the issue)
-            const params = Array.isArray(entry.ErrorParameters)
-                ? entry.ErrorParameters
-                : entry.ErrorParameters
-                    ? [entry.ErrorParameters]
-                    : [];
-            const paramText = params
-                .map((p) => (p?.ParamID ? `${p.ParamID}=${p.Value ?? ""}` : String(p?.Value ?? "")))
-                .filter(Boolean)
-                .join(", ");
-            const suffix = paramText ? ` (${paramText})` : "";
+    return collected;
+}
 
-            lines.push(`${prefix}${body}${suffix}`.trim());
-        }
+// FORMAT TRADING ERROR
+export function formatTradingError(err: unknown): string {
+    /**
+     * Extracts a human-readable message from an eBay Trading API error. The
+     * hendt/ebay-api client attaches the parsed XML response on the thrown
+     * error; this helper walks every place the client may have stashed the
+     * Errors array (including the raw XML body when axios left it as a
+     * string) and returns every entry on its own line with severity, error
+     * code, long message, and parameter hints. Surfacing the full set is
+     * important because eBay frequently returns warning-severity entries
+     * (such as the item-specifics-renamed advisory) alongside the actual
+     * error-severity entry that caused the failure, and showing only the
+     * first one hides the diagnostic the caller actually needs.
+     */
+
+    if (!(err instanceof Error)) return String(err);
+
+    const entries = collectTradingErrorEntries(err);
+    if (entries.length > 0) {
+        const lines = entries.map(formatTradingErrorEntry).filter(Boolean);
         if (lines.length > 0) return lines.join("\n");
     }
 

@@ -28,7 +28,7 @@ import DownloadIcon from "@mui/icons-material/Download";
 import CurrencyTextField from "./CurrencyTextField";
 import { saveResaleListing } from "../resales/actions";
 import type { resaleListing } from "../resales/actions";
-import { fetchListingImages, uploadListingImage, deleteListingImage, detectNumberplate, lookupRegistration, generateResaleDescription, generateResaleSellPrice, createEbayListingAction, cancelEbayListingAction, buildFacebookListingPayloadAction, saveResaleFacebookUrl } from "./actions";
+import { fetchListingImages, uploadListingImage, deleteListingImage, detectNumberplate, lookupRegistration, generateResaleDescription, generateResaleSellPrice, createEbayListingAction, cancelEbayListingAction, buildFacebookListingPayloadAction, saveResaleFacebookUrl, saveResaleEbayCategory } from "./actions";
 import type { DvlaVehicleData } from "./actions";
 import { deriveShortDescription } from "../lib/deriveShortDescription";
 
@@ -55,7 +55,7 @@ const AUTOCOMPLETE_FIELDS: { key: keyof resaleListing; label: string; lookupType
 interface ResaleListingEditorProps {
     data: resaleListing;
     lookupMap: Record<string, string[]>;
-    ebayCategories: { code: string; value: string | null }[];
+    ebayCategories: { code: string; value: string | null; description: string | null }[];
     onSaved?: (data: resaleListing) => void;
     pendingPrimaryImage?: File | null;
     onPendingImageConsumed?: () => void;
@@ -141,6 +141,7 @@ export default function ResaleListingEditor({
     const [facebookWorking, setFacebookWorking] = useState(false);
     const [facebookUrlInput, setFacebookUrlInput] = useState<string>(data.facebookUrl ?? "");
     const [facebookUrlSaving, setFacebookUrlSaving] = useState(false);
+    const [savingEbayCategory, setSavingEbayCategory] = useState(false);
 
     // keep the facebook url input in sync when the parent switches listing
     useEffect(() => {
@@ -402,6 +403,35 @@ export default function ResaleListingEditor({
         } finally {
             setUploadingPrimary(false);
             if (primaryFileInputRef.current) primaryFileInputRef.current.value = "";
+        }
+    };
+
+    // HANDLE EBAY CATEGORY CHANGE
+    const handleEbayCategoryChange = async (newCategoryId: string | null) => {
+        /**
+         * Updates the eBay category in local form state and, when the listing
+         * has already been persisted, immediately saves the new value to the
+         * database so the change survives a page refresh without requiring
+         * the user to press Save. New (unsaved) listings just hold the
+         * selection in local state until the row is created.
+         */
+
+        setField("ebayCategoryId", newCategoryId);
+
+        // no row id yet means there's nothing to update server-side; the
+        // value will be persisted when the user creates the listing
+        if (!formData.id) return;
+
+        setSavingEbayCategory(true);
+        try {
+            const result = await saveResaleEbayCategory(formData.id, newCategoryId);
+            if (!result.success) {
+                setSnackbar({open: true, message: result.error || "Failed to save eBay category", severity: "error"});
+            }
+        } catch (err) {
+            setSnackbar({open: true, message: err instanceof Error ? err.message : "Failed to save eBay category", severity: "error"});
+        } finally {
+            setSavingEbayCategory(false);
         }
     };
 
@@ -1098,27 +1128,54 @@ export default function ResaleListingEditor({
             <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
                 <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
                     <Typography variant="body2" sx={{ minWidth: 70 }}>eBay</Typography>
-                    <FormControl size="small" sx={{ minWidth: 200, maxWidth: 420, flex: "1 1 200px" }}>
-                        <InputLabel id="resale-ebay-category-label">eBay category</InputLabel>
-                        <Select
-                            labelId="resale-ebay-category-label"
-                            label="eBay category"
-                            value={formData.ebayCategoryId ?? ""}
-                            onChange={(e) => {
-                                const v = e.target.value;
-                                setField("ebayCategoryId", v === "" ? null : String(v));
-                            }}
-                        >
-                            <MenuItem value="">
-                                <em>None</em>
-                            </MenuItem>
-                            {ebayCategories.map((row) => (
-                                <MenuItem key={row.code} value={row.code}>
-                                    {row.value ?? row.code}
-                                </MenuItem>
-                            ))}
-                        </Select>
-                    </FormControl>
+                    <Autocomplete
+                        size="small"
+                        sx={{ minWidth: 200, maxWidth: 420, flex: "1 1 200px" }}
+                        options={ebayCategories}
+                        disabled={savingEbayCategory}
+                        // resolve the currently-stored code back to its option object so the
+                        // input shows the human-readable label rather than the raw code
+                        value={ebayCategories.find((c) => c.code === formData.ebayCategoryId) ?? null}
+                        // display as "{value} ({description})" so both the leaf label and the
+                        // full category path are visible while typing to filter
+                        getOptionLabel={(option) => {
+                            const label = option.value ?? option.code;
+                            return option.description ? `${label} (${option.description})` : label;
+                        }}
+                        isOptionEqualToValue={(option, val) => option.code === val.code}
+                        onChange={(_event, newValue) => {
+                            void handleEbayCategoryChange(newValue ? newValue.code : null);
+                        }}
+                        renderOption={(props, option) => {
+                            // strip mui's auto-generated key (it defaults to the label and
+                            // would collide on any duplicate label) and key by the unique
+                            // code instead
+                            const { key: _muiKey, ...liProps } = props as React.HTMLAttributes<HTMLLIElement> & { key?: React.Key };
+                            const label = option.value ?? option.code;
+                            return (
+                                <li key={option.code} {...liProps}>
+                                    {option.description ? `${label} (${option.description})` : label}
+                                </li>
+                            );
+                        }}
+                        renderInput={(params) => (
+                            <TextField
+                                {...params}
+                                label="eBay category"
+                                slotProps={{
+                                    input: {
+                                        ...params.InputProps,
+                                        endAdornment: (
+                                            <>
+                                                {savingEbayCategory ? <CircularProgress size={16} sx={{ mr: 1 }} /> : null}
+                                                {params.InputProps.endAdornment}
+                                            </>
+                                        ),
+                                    },
+                                }}
+                            />
+                        )}
+                    />
                     {formData.eBayUrl && (
                         <Typography
                             component="a"

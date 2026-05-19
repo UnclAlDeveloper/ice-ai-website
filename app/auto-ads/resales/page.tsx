@@ -61,7 +61,7 @@ export default async function Page() {
 
     let existingListings: { id: number; makeAndModel: string; shortDescription: string; registration: string | null }[] = [];
     let lookupMap: Record<string, string[]> = {};
-    let ebayCategories: { code: string; value: string | null }[] = [];
+    let ebayCategories: { code: string; value: string | null; description: string | null }[] = [];
     let error: string | null = null;
 
     try {
@@ -87,6 +87,7 @@ export default async function Page() {
                 .select({
                     code: lookups.code,
                     value: lookups.value,
+                    description: lookups.description,
                 })
                 .from(lookups)
                 .where(eq(lookups.lookupType, EBAY_CATEGORY_LOOKUP_TYPE)),
@@ -103,9 +104,12 @@ export default async function Page() {
             }
         }
 
-        ebayCategories = [...ebayCategoryRows].sort((a, b) =>
-            (a.value ?? a.code).localeCompare(b.value ?? b.code, undefined, { sensitivity: "base" }),
-        );
+        // sort by the visible label ("{value} ({description})") so the picker reads alphabetically
+        ebayCategories = [...ebayCategoryRows].sort((a, b) => {
+            const labelA = a.value ?? a.code;
+            const labelB = b.value ?? b.code;
+            return labelA.localeCompare(labelB, undefined, { sensitivity: "base" });
+        });
     } catch (err) {
         error = err instanceof Error ? err.message : String(err);
     }

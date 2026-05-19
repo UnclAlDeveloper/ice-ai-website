@@ -753,6 +753,47 @@ export async function saveResaleFacebookUrl(listingId: number, url: string | nul
     return {success: true};
 }
 
+// SAVE RESALE EBAY CATEGORY
+export async function saveResaleEbayCategory(listingId: number, categoryId: string | null): Promise<{
+    success: boolean;
+    error?: string;
+}> {
+    /**
+     * Persists the chosen eBay category code on the resale row the moment
+     * the user picks a value in the editor. Loads the current row first
+     * so unrelated columns are preserved untouched. Accepts null (or an
+     * empty / whitespace-only string) to clear the stored category.
+     */
+
+    const session = await getServerSessionFromCookies();
+    if (!session) {
+        return {success: false, error: "Not authenticated"};
+    }
+
+    const loaded = await getResaleListing(listingId);
+    if (!loaded.success || !loaded.listing) {
+        return {success: false, error: loaded.error || "Listing not found"};
+    }
+
+    // normalise whitespace and empty strings to null so the column is
+    // cleanly cleared when the user picks "no category"
+    const normalised = categoryId?.trim() ? categoryId.trim() : null;
+
+    const toSave: resaleListing = {
+        ...loaded.listing,
+        ebayCategoryId: normalised,
+    };
+    const saved = await saveResaleListing(toSave);
+    if (!saved.success) {
+        return {
+            success: false,
+            error: saved.error || "Failed to save eBay category.",
+        };
+    }
+
+    return {success: true};
+}
+
 // GENERATE RESALE DESCRIPTION
 export async function generateResaleDescription(
     formData: resaleListing,
@@ -814,8 +855,8 @@ export async function generateResaleDescription(
             imageUrls,
         );
 
-        if (!result) {
-            return {success: false, error: "Gemini returned an empty description"};
+        if (!result.ok) {
+            return {success: false, error: result.error};
         }
 
         return {success: true, description: result.description, specsAndFeatures: result.specsAndFeatures};

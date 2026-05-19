@@ -27,7 +27,7 @@ import ResaleListingEditor from "../components/ResaleListingEditor";
 interface ResalesClientProps {
     existingListings: {id: number; makeAndModel: string; shortDescription: string; registration: string | null}[];
     lookupMap: Record<string, string[]>;
-    ebayCategories: {code: string; value: string | null}[];
+    ebayCategories: {code: string; value: string | null; description: string | null}[];
     canUseAiSellPrice: boolean;
 }
 /** Props received from the server component: existing listing summaries, lookup values, eBay category options, and whether AI sell price is allowed for this user's tier. */

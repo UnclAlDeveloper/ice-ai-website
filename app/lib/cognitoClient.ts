@@ -28,6 +28,7 @@ import {
 import {STSClient, GetCallerIdentityCommand} from "@aws-sdk/client-sts";
 import {SESClient, GetIdentityVerificationAttributesCommand, GetSendQuotaCommand} from "@aws-sdk/client-ses";
 import {createHmac} from "crypto";
+import {CognitoConfigurationError} from "@app/lib/cognitoErrors";
 
 // COGNITO CLIENT
 export function createCognitoClient() {
@@ -36,7 +37,7 @@ export function createCognitoClient() {
     const region = process.env.COGNITO_REGION || process.env.AWS_REGION_NAME;
 
     if (!region) {
-        throw new Error("COGNITO_REGION or AWS_REGION_NAME must be configured");
+        throw new CognitoConfigurationError("COGNITO_REGION or AWS_REGION_NAME must be configured");
     }
 
     return new CognitoIdentityProviderClient({region});
@@ -52,7 +53,7 @@ export function getCognitoConfig() {
     const domain = process.env.NEXT_PUBLIC_COGNITO_DOMAIN || "https://auth.uncl-al.com";
 
     if (!userPoolId || !clientId) {
-        throw new Error("COGNITO_USER_POOL_ID and AUTH_COGNITO_ID must be configured");
+        throw new CognitoConfigurationError("COGNITO_USER_POOL_ID and AUTH_COGNITO_ID must be configured");
     }
 
     return {

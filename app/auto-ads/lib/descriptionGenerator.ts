@@ -1,4 +1,4 @@
-import {GoogleGenAI} from "@google/genai";
+import {ApiError, GoogleGenAI, type GenerateContentResponse} from "@google/genai";
 import {readFileSync} from "fs";
 import {join} from "path";
 
@@ -129,6 +129,69 @@ export interface DescriptionResult {
     specsAndFeatures: string | null;
 }
 
+// GENERATE DESCRIPTION OUTCOME
+export type GenerateDescriptionOutcome =
+    | {ok: true; description: string; specsAndFeatures: string | null}
+    | {ok: false; error: string};
+
+// FORMAT GEMINI API ERROR
+function formatGeminiApiError(err: unknown): string {
+    /**
+     * Turns Gemini SDK errors into short messages suitable for the UI, instead
+     * of returning raw JSON blobs to the client.
+     */
+
+    if (err instanceof ApiError) {
+        if (err.status === 429) {
+            return "Gemini API quota exceeded — try again later or switch GEMINI_MODEL_NAME to a model with remaining quota";
+        }
+        return err.message;
+    }
+
+    if (err instanceof Error) {
+        try {
+            const parsed = JSON.parse(err.message) as {error?: {message?: string; code?: number}};
+            const apiMessage = parsed.error?.message;
+            if (apiMessage) {
+                if (parsed.error?.code === 429) {
+                    return "Gemini API quota exceeded — try again later or switch GEMINI_MODEL_NAME to a model with remaining quota";
+                }
+                return apiMessage;
+            }
+        } catch {
+            // not json — use err.message below
+        }
+        return err.message;
+    }
+
+    return String(err);
+}
+
+// GEMINI EMPTY RESPONSE ERROR
+function geminiEmptyResponseError(response: GenerateContentResponse): string {
+    /**
+     * Builds a user-facing error when Gemini returns no text, including block
+     * reasons and finish reasons when the API provides them.
+     */
+
+    const candidate = response.candidates?.[0];
+    const finishReason = candidate?.finishReason;
+    const blockReason = response.promptFeedback?.blockReason;
+    const blockMessage = response.promptFeedback?.blockReasonMessage;
+
+    const detailParts: string[] = [];
+    if (blockReason) {
+        detailParts.push(`prompt blocked (${blockReason}${blockMessage ? `: ${blockMessage}` : ""})`);
+    }
+    if (finishReason) {
+        detailParts.push(`finishReason=${finishReason}`);
+    }
+
+    return detailParts.length
+        ? `Gemini returned no text — ${detailParts.join(", ")}`
+        : "Gemini returned no text";
+}
+
 // SPLIT DESCRIPTION RESPONSE
 function splitDescriptionResponse(raw: string): DescriptionResult {
     /**
@@ -156,13 +219,13 @@ function splitDescriptionResponse(raw: string): DescriptionResult {
 export async function generateDescription(
     details: VehicleDetails,
     imageUrls: string[],
-): Promise<DescriptionResult | null> {
+): Promise<GenerateDescriptionOutcome> {
     /**
      * Calls the Gemini API with the vehicle details and any available images
      * to generate a compelling listing description and a specs & features
      * list. The system prompt is read from create_description.md at call
-     * time. Returns a DescriptionResult with both sections, or null if the
-     * API call fails or returns an empty response.
+     * time. Returns both sections on success, or a descriptive error when
+     * configuration, the API call, or the response is invalid.
      */
 
     const apiKey = process.env.AUTO_ADS_GOOGLE_API_KEY;
@@ -170,7 +233,7 @@ export async function generateDescription(
 
     if (!apiKey) {
         console.error("[DESCRIPTION] AUTO_ADS_GOOGLE_API_KEY is not set");
-        return null;
+        return {ok: false, error: "AUTO_ADS_GOOGLE_API_KEY is not configured on the server"};
     }
 
     const systemPrompt = readPromptFile("create_description.md");
@@ -208,12 +271,24 @@ export async function generateDescription(
         const text = response.text?.trim() || "";
         console.log(`[DESCRIPTION] Gemini responded in ${duration}ms (${text.length} chars)`);
 
-        if (!text) return null;
+        if (!text) {
+            const error = geminiEmptyResponseError(response);
+            console.error(`[DESCRIPTION] ${error}`);
+            return {ok: false, error};
+        }
 
-        return splitDescriptionResponse(text);
+        const split = splitDescriptionResponse(text);
+        if (!split.description) {
+            const error = "Gemini returned a response with no description section";
+            console.error(`[DESCRIPTION] ${error}`);
+            return {ok: false, error};
+        }
+
+        return {ok: true, description: split.description, specsAndFeatures: split.specsAndFeatures};
     } catch (err) {
-        console.error("[DESCRIPTION] Gemini API error:", err instanceof Error ? err.message : String(err));
-        return null;
+        const message = formatGeminiApiError(err);
+        console.error("[DESCRIPTION] Gemini API error:", message);
+        return {ok: false, error: message};
     }
 }
 

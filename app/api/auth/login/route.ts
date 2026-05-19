@@ -1,5 +1,6 @@
 import {NextRequest, NextResponse} from "next/server";
-import {adminInitiateAuth, initiateAuth} from "@app/lib/cognitoClient";
+import {initiateAuth} from "@app/lib/cognitoClient";
+import {classifyCognitoError} from "@app/lib/cognitoErrors";
 import {SessionPayload, createSessionCookiesOnResponse, decodeIdToken} from "@app/lib/session";
 
 // LOGIN HANDLER
@@ -84,30 +85,19 @@ export async function POST(request: NextRequest) {
 
         return jsonResponse;
     } catch (error) {
+        // always log the full error server-side so misconfiguration and infrastructure issues surface in monitoring
         console.error("Cognito login error", error);
 
-        // AWS SDK v3 errors can have the error name in different places
-        const err = error as { name?: string; message?: string; __type?: string };
-        const code = err.name ?? err.__type ?? "UnknownError";
-        const rawMessage = err.message ?? "Unknown login error";
-
-        let userMessage = "Invalid username or password.";
-
-        if (code === "UserNotConfirmedException") {
-            userMessage = "Your account is not confirmed. Please check your email for the verification code.";
-        } else if (code === "NotAuthorizedException") {
-            userMessage = "Invalid username or password.";
-        } else if (code === "UserNotFoundException") {
-            userMessage = "Invalid username or password.";
-        }
+        // classify the error so config and infrastructure failures do not get returned as 401s
+        const {status, code, userMessage, details} = classifyCognitoError(error);
 
         return NextResponse.json(
             {
                 error: userMessage,
                 code,
-                details: rawMessage,
+                details,
             },
-            {status: 401},
+            {status},
         );
     }
 }

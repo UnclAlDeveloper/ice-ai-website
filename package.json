@@ -8,6 +8,7 @@
   "scripts": {
     "preinstall": "node scripts/check-npm-cwd.cjs",
     "dev": "next dev --turbopack",
+    "dev:debug": "next dev --webpack",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",

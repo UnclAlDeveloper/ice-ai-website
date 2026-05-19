@@ -1,0 +1,7 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Ice-AI full stack" type="JavascriptDebugType" uri="http://localhost:3000/">
+    <method v="2">
+      <option name="RunConfigurationTask" enabled="true" run_configuration_name="Ice-AI server" run_configuration_type="NodeJSConfigurationType" />
+    </method>
+  </configuration>
+</component>

@@ -1,0 +1,9 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Ice-AI server" type="NodeJSConfigurationType" application-parameters="dev --webpack" path-to-node="wsl://Ubuntu@/home/graeme/.nvm/versions/node/v22.22.2/bin/node" path-to-js-file="node_modules/next/dist/bin/next" typescript-loader="bundled" working-dir="//wsl$/Ubuntu/Ice-AI/website">
+    <envs>
+      <env name="DEFAULT_APP_NAME" value="auto-ads" />
+      <env name="NODE_OPTIONS" value="--inspect" />
+    </envs>
+    <method v="2" />
+  </configuration>
+</component>

@@ -1,5 +1,6 @@
 import {NextRequest, NextResponse} from "next/server";
 import {initiateAuth} from "@app/lib/cognitoClient";
+import {classifyCognitoError} from "@app/lib/cognitoErrors";
 import {
     SessionPayload,
     createSessionCookies,
@@ -60,11 +61,22 @@ export async function POST(_request: NextRequest) {
             {status: 200},
         );
     } catch (error) {
+        // always log the full error server-side so misconfiguration and infrastructure issues surface in monitoring
         console.error("Cognito refresh error", error);
 
+        // classify the error so a stale refresh token still returns 401 but config or infrastructure failures return 5xx
+        const {status, code, userMessage, details} = classifyCognitoError(error);
+
+        // refresh failures should present a refresh-specific message rather than the generic auth one
+        const refreshMessage = status === 401 ? "Unable to refresh session" : userMessage;
+
         return NextResponse.json(
-            {error: "Unable to refresh session"},
-            {status: 401},
+            {
+                error: refreshMessage,
+                code,
+                details,
+            },
+            {status},
         );
     }
 }
