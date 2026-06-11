@@ -218,6 +218,27 @@
       "when": 1778838307365,
       "tag": "0030_solid_wong",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1781109479338,
+      "tag": "0031_hot_xorn",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1781146590382,
+      "tag": "0032_public_red_wolf",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1781150229360,
+      "tag": "0033_empty_synch",
+      "breakpoints": true
     }
   ]
 }

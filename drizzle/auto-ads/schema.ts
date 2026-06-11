@@ -45,7 +45,9 @@ export const prospectListings = aa.table("prospect_listings", {
 	hashCode: char("hash_code", { length: 16 }).notNull(),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }),
+	statusCheckedAt: timestamp("status_checked_at", { withTimezone: true, mode: 'string' }),
 	listingSource: listingSource("listing_source").notNull(),
+	sourceId: varchar("source_id"),
 	status: prospectListingStatus().notNull(),
 	makeAndModel: varchar("make_and_model").notNull(),
 	shortDescription: varchar("short_description").notNull(),
@@ -101,7 +103,7 @@ export const prospectListings = aa.table("prospect_listings", {
 	revenueWeight: integer("revenue_weight"),
 }, (table) => [
 	index("idx_prospect_listings_hash_code").using("btree", table.hashCode.asc().nullsLast().op("bpchar_ops")),
-	unique("prospect_listings_hash_code_unique").on(table.hashCode),
+	index("idx_prospect_listings_source_id").using("btree", table.sourceId.asc().nullsLast().op("bpchar_ops")),
 ]);
 
 

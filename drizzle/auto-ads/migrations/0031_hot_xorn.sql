@@ -1,0 +1,1 @@
+ALTER TABLE "aa"."prospect_listings" ADD COLUMN "status_checked_at" timestamp with time zone;
