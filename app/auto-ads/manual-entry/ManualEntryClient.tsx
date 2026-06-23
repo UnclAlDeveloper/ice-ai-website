@@ -31,6 +31,7 @@ import ProspectListingEditor from "../components/ProspectListingEditor";
 // NEW LISTING DEFAULTS
 const NEW_LISTING_DEFAULTS: ProspectListingData = {
     status: "Bought",
+    listingType: "Car",
     makeAndModel: "",
     shortDescription: "",
     fullDescription: null,

@@ -79,9 +79,9 @@ export default async function Page({
                     eq(prospectListings.status, 'Bought'),
                 ];
             } else if (filter === 'classic-cars') {
-                // classic cars filter: Cars&Classic source with active statuses and required AI pricing/notes
+                // classic cars filter: Classic listing type with active statuses and required AI pricing/notes
                 whereConditions = [
-                    eq(prospectListings.listingSource, 'Car&Classic'),
+                    eq(prospectListings.listingType, 'Classic'),
                     inArray(prospectListings.status, ['New', 'Viewed']),
                     isNotNull(prospectListings.aiSellPriceLow),
                     isNotNull(prospectListings.aiResellNotes),

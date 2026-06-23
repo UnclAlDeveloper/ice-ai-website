@@ -285,6 +285,7 @@ export async function copyProspectToResale(prospectListingId: number): Promise<{
                 createdAt: now,
                 updatedAt: now,
                 listingSource: prospect.listingSource,
+                listingType: prospect.listingType,
                 status: "Bought",
                 makeAndModel: prospect.makeAndModel,
                 shortDescription: prospect.shortDescription,

@@ -48,6 +48,8 @@
     "@emotion/cache": "^11.14.0",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.0",
+    "@fontsource/akaya-kanadaka": "^5.2.7",
+    "@fontsource/amiri-quran": "^5.2.10",
     "@fontsource/roboto": "^5.1.0",
     "@google/genai": "^1.40.0",
     "@huggingface/transformers": "^3.8.1",

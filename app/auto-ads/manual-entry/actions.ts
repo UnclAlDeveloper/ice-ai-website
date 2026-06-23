@@ -12,6 +12,7 @@ import {processAiAnalysisForListing, type AiAnalysisFields} from "@app/auto-ads/
 export type ProspectListingData = {
     id?: number;
     status: string;
+    listingType: typeof prospectListings.$inferSelect.listingType;
     makeAndModel: string;
     shortDescription: string;
     fullDescription: string | null;
@@ -155,6 +156,7 @@ export async function getProspectListing(id: number): Promise<{
             .select({
                 id: prospectListings.id,
                 status: prospectListings.status,
+                listingType: prospectListings.listingType,
                 makeAndModel: prospectListings.makeAndModel,
                 shortDescription: prospectListings.shortDescription,
                 fullDescription: prospectListings.fullDescription,
@@ -230,6 +232,7 @@ export async function saveProspectListing(data: ProspectListingData): Promise<{
                 .update(prospectListings)
                 .set({
                     status: data.status as typeof prospectListings.$inferInsert.status,
+                    listingType: data.listingType,
                     makeAndModel: data.makeAndModel,
                     shortDescription: data.shortDescription,
                     fullDescription: data.fullDescription,
@@ -283,6 +286,7 @@ export async function saveProspectListing(data: ProspectListingData): Promise<{
                 createdAt: now,
                 updatedAt: now,
                 listingSource: "ManualEntry",
+                listingType: data.listingType,
                 status: data.status as typeof prospectListings.$inferInsert.status,
                 makeAndModel: data.makeAndModel,
                 shortDescription: data.shortDescription,

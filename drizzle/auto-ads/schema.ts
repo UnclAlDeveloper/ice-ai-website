@@ -4,20 +4,21 @@ export const aa = pgSchema("aa");
 export const listingSource = aa.enum(
 	"listing_source",
 	['Autotrader', 'Car&Classic', 'eBay', 'Facebook', 'Gumtree', 'ManualEntry', 'OnlyVans']
-)
+);
+export const listingType = aa.enum("listing_type", ['Car', 'Van', 'Classic', 'Item', 'Boat', 'Yacht']);
 export const listingTable = aa.enum("listing_table", ['Prospect', 'Resale', 'SaleItem'])
 export const prospectListingStatus = aa.enum(
 	"prospect_listing_status",
 	['New', 'NotAvailable', 'Viewed', 'NotInterested', 'Interested', 'Bought', 'Sold']
-)
+);
 export const resaleListingStatus = aa.enum(
 	"resale_listing_status",
 	['Bought', 'Sold']
-)
+);
 export const saleListingStatus = aa.enum(
 	"sale_listing_status",
 	['Inventory', 'Sold']
-)
+);
 
 export const lookups = aa.table("lookups", {
 	id: serial().primaryKey().notNull(),
@@ -47,6 +48,7 @@ export const prospectListings = aa.table("prospect_listings", {
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }),
 	statusCheckedAt: timestamp("status_checked_at", { withTimezone: true, mode: 'string' }),
 	listingSource: listingSource("listing_source").notNull(),
+	listingType: listingType("listing_type").notNull(),
 	sourceId: varchar("source_id"),
 	status: prospectListingStatus().notNull(),
 	makeAndModel: varchar("make_and_model").notNull(),
@@ -113,6 +115,7 @@ export const resaleListings = aa.table("resale_listings", {
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }),
 	listingSource: listingSource("listing_source").notNull(),
+	listingType: listingType("listing_type").notNull(),
 	status: resaleListingStatus().notNull(),
 	makeAndModel: varchar("make_and_model").notNull(),
 	shortDescription: varchar("short_description").notNull(),

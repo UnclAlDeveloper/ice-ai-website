@@ -239,6 +239,27 @@
       "when": 1781150229360,
       "tag": "0033_empty_synch",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1781256966786,
+      "tag": "0034_vengeful_proudstar",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1781258339317,
+      "tag": "0035_old_rick_jones",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1781258452127,
+      "tag": "0036_fine_ultron",
+      "breakpoints": true
     }
   ]
 }

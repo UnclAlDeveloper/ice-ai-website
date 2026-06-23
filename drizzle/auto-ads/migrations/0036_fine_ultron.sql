@@ -1,0 +1,1 @@
+ALTER TABLE "aa"."resale_listings" ALTER COLUMN "listing_type" SET NOT NULL;
