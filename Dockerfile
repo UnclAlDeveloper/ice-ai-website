@@ -39,7 +39,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 # install ffmpeg for video processing (apt for Debian-based image)
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg procps \
     && rm -rf /var/lib/apt/lists/*
 
 # creates node.js group and next.js user (--ingroup for Debian so nextjs:nodejs chown works)
