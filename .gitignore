@@ -47,3 +47,5 @@ next-env.d.ts
 
 # Prompt files and markdown
 *_prompt.md
+
+graphify-out
