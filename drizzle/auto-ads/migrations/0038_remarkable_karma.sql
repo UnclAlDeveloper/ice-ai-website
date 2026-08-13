@@ -1,0 +1,2 @@
+ALTER TABLE "aa"."prospect_listings" ALTER COLUMN "source_id" SET NOT NULL;--> statement-breakpoint
+ALTER TABLE "aa"."prospect_listings" ADD CONSTRAINT "prospect_listings_listing_source_source_id_unique" UNIQUE("listing_source","source_id");

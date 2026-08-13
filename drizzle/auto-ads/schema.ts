@@ -3,7 +3,7 @@ import {pgSchema, serial, varchar, boolean, timestamp, integer, index, unique, c
 export const aa = pgSchema("aa");
 export const listingSource = aa.enum(
 	"listing_source",
-	['Autotrader', 'Car&Classic', 'eBay', 'Facebook', 'Gumtree', 'ManualEntry', 'OnlyVans']
+	['Autotrader', 'Car&Classic', 'eBay', 'Facebook', 'Gumtree', 'ManualEntry', 'OnlyVans', 'Pistonheads']
 );
 export const listingType = aa.enum("listing_type", ['Car', 'Van', 'Classic', 'Item', 'Boat', 'Yacht']);
 export const listingTable = aa.enum("listing_table", ['Prospect', 'Resale', 'SaleItem'])
@@ -49,7 +49,7 @@ export const prospectListings = aa.table("prospect_listings", {
 	statusCheckedAt: timestamp("status_checked_at", { withTimezone: true, mode: 'string' }),
 	listingSource: listingSource("listing_source").notNull(),
 	listingType: listingType("listing_type").notNull(),
-	sourceId: varchar("source_id"),
+	sourceId: varchar("source_id").notNull(),
 	status: prospectListingStatus().notNull(),
 	makeAndModel: varchar("make_and_model").notNull(),
 	shortDescription: varchar("short_description").notNull(),
@@ -104,6 +104,7 @@ export const prospectListings = aa.table("prospect_listings", {
 	typeApproval: varchar("type_approval"),
 	revenueWeight: integer("revenue_weight"),
 }, (table) => [
+	unique("prospect_listings_listing_source_source_id_unique").on(table.listingSource, table.sourceId),
 	index("idx_prospect_listings_hash_code").using("btree", table.hashCode.asc().nullsLast().op("bpchar_ops")),
 	index("idx_prospect_listings_source_id").using("btree", table.sourceId.asc().nullsLast().op("bpchar_ops")),
 ]);

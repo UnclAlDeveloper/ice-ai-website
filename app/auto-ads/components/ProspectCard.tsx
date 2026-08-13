@@ -37,6 +37,7 @@ const listingSourceLogoMap: Record<string, string> = {
     'Facebook': '/images/auto-ads/sources/facebook.png',
     'Gumtree': '/images/auto-ads/sources/gumtree.png',
     'OnlyVans': '/images/auto-ads/sources/onlyvans.png',
+    'Pistonheads': '/images/auto-ads/sources/pistonheads',
 };
 
 // GET STATUS COLOR
